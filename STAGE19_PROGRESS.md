@@ -1,10 +1,69 @@
 # Stage 19 — Admin Revenue & Subscription Analytics
 
-**Status: Stage 19A (backend) and 19B (frontend) complete and verified.**
+**Status: Stage 19A (backend), 19B (frontend) and 19C (final verification + plan breakdown) all complete. Stage 19 is done.**
 
 Tracking doc — status only, not a spec restatement.
 
-## Stage 19B — frontend (this session)
+## Stage 19C — final verification (this session)
+
+### Completed
+- **Security verification** (all live against Docker Compose):
+  - Unauthenticated → 401. Garbage/empty-bearer token → 401 (never 500). Student → 403. **Instructor → 403** (freshly created test account — confirms no privilege escalation via a non-admin role, not just "student" specifically). Admin → 200.
+  - Response body inspected directly: contains only `currency`/aggregated numbers/`plan_id`+`plan_name`. No `user_id`, `email`, `provider`, `provider_payment_id`, or `idempotency_key` anywhere — confirmed by grep against the raw JSON, not just code review.
+  - No payment-provider secrets touched or exposed — the analytics code path never references `PaymentProvider`/`cfg.PaymentProvider` at all, only reads `payments`/`subscriptions`/`subscription_plans` columns.
+  - Date-range validation probed with: malformed strings, invalid calendar dates (`2026-13-45`), a SQL-injection-shaped string, an XSS-shaped string, wrong separators (`2026/08/11`), an oversized string, and an inverted range (`from > to`). Every malformed input → 400, never 500, never reached the database (parsing fails before any query runs — `time.Parse` rejects first, and even if it reached SQL, values are always bound parameters, never interpolated). Inverted range → 200 with correctly empty results (not an error, since `paid_at >= from AND paid_at < to` with `from > to` structurally matches nothing).
+- **Correctness verification** (live, with real and controlled test data):
+  - **Currency isolation**: created a second plan in USD, confirmed a payment against it — response showed KZT and USD as two independent rows (990000 KZT vs 300000 USD), never summed into one figure.
+  - **MRR formula**: hand-calculated against a **90-day** plan (price 300000) — `300000 * 30 / 90 = 100000` — matched the live response exactly. (Stage 19A had only verified the trivial 30-day passthrough case; this is the first test of the actual normalization arithmetic.)
+  - **Active-subscription correctness under a stale status**: set a real test subscription's `expires_at` to the past while leaving `status='active'` (simulating a row the lazy-sync-on-read in `GetActiveSubscription` hasn't touched yet) — `active_subscriptions`/`mrr` correctly dropped to 0, confirming the analytics query independently re-checks `expires_at > now()` rather than trusting the stored status column.
+  - **Canceled-subscription counting**: set `canceled_at = now()` on a test subscription — `canceled_subscriptions` incremented correctly, and correctly dropped back to 0 when queried with a date range excluding today (period-scoping confirmed, not just presence).
+  - **Refunded amount/count**: still correctly reads 0 — no code path in the codebase sets `status='refunded'` (unchanged conclusion from 19A, re-confirmed).
+  - **Date-range boundaries**: re-confirmed the `[from, to)` inclusive/exclusive behavior from 19A still holds after the 19C changes.
+- **Stage 19B gap resolved — per-plan breakdown implemented.** Reviewed the `subscription_plans`/`subscriptions`/`payments` schema: confirmed a per-plan aggregate is a small additive `LEFT JOIN` query (`subscription_plans` → `subscriptions` → `payments`, `GROUP BY plan_id`) requiring no schema change and no touch to `CreateSubscription`/`ConfirmPayment`/checkout — so it was implemented rather than left deferred, per the instructions ("if it can be added cleanly... implement it"):
+  - `internal/subscriptions/model.go`: new `PlanRevenue` type, `RevenueAnalytics.PlanBreakdown []PlanRevenue` field.
+  - `internal/subscriptions/repository.go`: new `GetPlanBreakdown(ctx, from, to)` — one query, `LEFT JOIN`s through subscriptions to payments so plans with zero activity still appear (all-zero row) rather than being omitted; uses `COUNT(DISTINCT s.id) FILTER(...)` for the subscription-based counts to stay correct even if a future payment-retry flow ever puts more than one payment row on a subscription (today it's always 1:1, but this doesn't assume that).
+  - `internal/subscriptions/service.go`: `GetRevenueAnalytics` now composes both the currency and plan aggregates.
+  - No handler/route change — same `GET /admin/analytics/revenue` endpoint, richer payload.
+  - **Verified live**: created a plan, a subscription, and a confirmed payment for it — `plan_breakdown` correctly attributed `active_subscriptions: 1, new_subscriptions: 1, paid_amount: 990000, paid_count: 1` to that specific plan.
+  - **One documented, expected edge case**: a payment whose `subscription_id` went `NULL` (only possible if a subscription row is deleted — never happens through normal app use; it's how Stage 19A's own cleanup-script mistake happened to leave one payment orphaned) still counts toward the currency totals in `by_currency` but can no longer be attributed to any plan in `plan_breakdown`, since attribution requires the `subscription → plan` link. This was directly observed live: `by_currency` showed 3 payments/29700 KZT while `plan_breakdown` showed only 2 payments/19800 KZT for the one real plan — mathematically consistent given the one orphaned payment, not a bug. Documented both in a backend code comment and directly in the frontend UI's caption under the "By plan" table.
+  - Frontend: `lib/admin-api.ts` gained `PlanRevenue` + `plan_breakdown` on `AdminRevenueAnalytics`; `app/admin/analytics/page.tsx`'s "not available yet" note was replaced with an actual `.admin-table` (Plan / Currency / Active / New / Canceled / Revenue), rendered **only when `plan_breakdown.length > 0`** (no fabricated rows, matches the instruction not to invent data) — screenshot-verified showing the real "Pro" plan row with correct numbers.
+- **Performance**: re-seeded ~150 synthetic subscriptions/payments across 3 currencies (isolated under 3 dedicated synthetic plan ids this time — not the real "Pro" plan — specifically to make cleanup exact after Stage 19A's overly-broad cleanup mistake) and ran `EXPLAIN ANALYZE` on all four aggregate queries (the three from 19A plus the new plan-breakdown query):
+
+  | Query | Plan | Execution time |
+  |---|---|---|
+  | Payment flow by currency | Seq scan on `payments` (152 rows) | 0.260 ms |
+  | Subscription flow by currency | Seq scan on `subscriptions` (151 rows) + memoized index scan on `subscription_plans` pkey | 0.336 ms |
+  | Active + MRR by currency | Seq scan on `subscriptions` (filtered) + memoized index scan on `subscription_plans` pkey | 0.266 ms |
+  | **Plan breakdown (new)** | Hash Right Join × 2 (`payments`→`subscriptions`→`subscription_plans`), all seq scans | **0.812 ms** |
+
+  All four sub-millisecond. The plan-breakdown query is the most expensive (two hash joins + a sort) but still trivial at this scale. **No index migration added** — not proven necessary by the query plan, same conclusion as 19A. One latent observation for future scale: `subscriptions.plan_id` has no dedicated index today (only `user_id`, `status`, `expires_at` do, from migration `00023`) and is the join key in all four queries; at the current table size the planner correctly prefers a full seq scan + hash join over using one, so this isn't a current problem, but it's the first column worth indexing if `subscriptions` ever grows large enough to change that plan.
+  - Synthetic data cleaned up **precisely** this time — deleted by the three dedicated synthetic plan ids only (no `NOT IN`/`LIMIT` tricks), verified table counts returned to the exact pre-seed baseline (2 payments, 1 subscription, 1 plan) afterward.
+- **Regression** (live, all against the actual running stack, not just code review):
+  - Public `GET /plans` → 200. `GET /me/subscription` → 200 for a real student. `GET /admin/subscriptions`, `GET /admin/payments`, `GET /admin/plans` → 200, unaffected.
+  - **Full checkout flow re-run end-to-end**: register → `POST /subscriptions` (201) → `POST /payments/:id/mock-confirm` (200) → `GET /me/subscription` shows `active: true` — proves `CreateSubscription`/`ConfirmMockPayment` are completely unaffected by the 19C changes.
+  - Frontend: `/admin`, `/admin/subscriptions`, `/admin/payments`, `/admin/plans` all still 200 for admin. `/dashboard/subscription` (student-facing) and `/pricing` (public) both still 200.
+  - Admin layout/navigation: `Sidebar.tsx`/`SidebarShell.tsx` were not touched this session (only the already-existing Analytics nav item from 19B remains); "Analytics" correctly highlights as the active item.
+- **Frontend verification**: `npx tsc --noEmit` clean, `npx eslint app/admin/analytics lib/admin-api.ts` clean, `npm run build` clean (`/admin/analytics` among all generated routes). Live: unauthenticated → 307, instructor → 307 (layout redirect), admin → 200 with the new "By plan" table visible and correctly populated; screenshot-confirmed dark theme/sidebar/table styling all consistent with the rest of the admin panel, no visual regressions.
+
+### Files changed (19C only)
+- `backend/internal/subscriptions/model.go` — `PlanRevenue` type, `PlanBreakdown` field.
+- `backend/internal/subscriptions/repository.go` — `GetPlanBreakdown`.
+- `backend/internal/subscriptions/service.go` — composes the new query into the response.
+- `frontend/lib/admin-api.ts` — `PlanRevenue` type, `plan_breakdown` field.
+- `frontend/app/admin/analytics/page.tsx` — real "By plan" table replacing the "not available" note.
+- No route/handler signature changed; no migration added.
+
+### Known limitations (carried forward + new)
+- `refunded_amount`/`refunded_count` still always read 0 — no refund code path exists anywhere in this codebase yet (unchanged from 19A).
+- `plan_breakdown` and `by_currency` can legitimately disagree if a payment's subscription was ever deleted (orphaning it) — documented above, surfaced in the UI, not a bug in either query.
+- No automated test suite exists in this codebase (established convention) — verification remains build/vet/lint/typecheck + live scripted + visual checks, consistent with every prior stage.
+- `subscriptions.plan_id` has no dedicated index — not currently a performance problem (see EXPLAIN ANALYZE above) but flagged as the first candidate if `subscriptions` grows substantially.
+
+### Remaining (explicitly out of scope, not attempted)
+- Full-platform regression across all domains (Stage 1–18) — only the subscriptions/payments/admin/analytics surface was re-verified, per this session's instructions.
+- Stage 20 or any further stage — not started.
+
+## Stage 19B — frontend
 
 ### Completed
 - New admin page `/admin/analytics` (Server Component, follows the exact same pattern as every other `/admin/*` page: `getSessionToken()` → redirect to `/login` if absent; the actual role gate is `app/admin/layout.tsx`, unchanged, which already redirects non-admins to `/dashboard` before this page ever renders).
@@ -17,7 +76,7 @@ Tracking doc — status only, not a spec restatement.
   - **Empty**: `by_currency.length === 0` → existing `.empty-state` block.
   - **API error**: any other fetch failure → `role="alert"` message with the error text, matching the `courses/[id]` page's existing error-paragraph convention.
   - **Unauthorized/forbidden**: `adminGetRevenueAnalytics` throws `Error("UNAUTHORIZED")`/`Error("FORBIDDEN")` specifically on 401/403 (checked before falling through to the generic error path) → distinct "session expired, log in again" / "no permission" messages. In practice the layout's server-side role redirect makes this unreachable for a normal user, but it's handled defensively for a mid-session token expiry/role change race.
-- **Known, intentional gap — "subscription breakdown by plan" is not implemented.** The task's display list included it, but the Stage 19A backend deliberately scoped `GetRevenueAnalytics` to currency-only aggregation (see "Not started" below in the 19A section) and this session's instructions were explicit: *reuse* the existing endpoint, *do not reimplement backend analytics*. Adding a per-plan breakdown would require a new backend query/response field, which is out of scope for a frontend-only session. This is surfaced honestly in the UI itself (a visible note at the bottom of the page pointing to this doc), not silently dropped.
+- **Known, intentional gap at the time — "subscription breakdown by plan" is not implemented.** The task's display list included it, but the Stage 19A backend deliberately scoped `GetRevenueAnalytics` to currency-only aggregation, and this session's instructions were explicit: *reuse* the existing endpoint, *do not reimplement backend analytics*. Surfaced honestly in the UI (a note at the bottom of the page) rather than silently dropped. **Resolved in Stage 19C** (see the top of this document) — the backend now exposes a real per-plan breakdown and the frontend renders it.
 
 ### Files changed
 - `frontend/app/admin/analytics/page.tsx` — new.
@@ -40,7 +99,7 @@ Tracking doc — status only, not a spec restatement.
 - Regression-lite: `/admin`, `/admin/subscriptions`, `/admin/payments` unaffected (only an additive nav-item change touched the shared layout; the sidebar `Sidebar.tsx`/`SidebarShell.tsx` components themselves were not modified).
 
 ### Known issues
-- Per-plan subscription/revenue breakdown not available (see "Completed" above — a backend limitation carried over from 19A, not a frontend bug).
+- ~~Per-plan subscription/revenue breakdown not available~~ — **resolved in Stage 19C** (see the top of this document).
 - `refunded_amount`/`refunded_count` will always read 0 in this demo environment since no code path in the codebase ever transitions a payment to `status='refunded'` yet (documented already in 19A) — the UI correctly displays this as zero rather than hiding the tile, so the fields are visible and ready for whenever a refund path exists.
 - No automated frontend tests exist in this codebase for any page (established convention, confirmed in 19A) — verification is build/lint/typecheck + live manual/scripted checks, consistent with every prior stage.
 
@@ -105,7 +164,7 @@ The synthetic seed (120 subscriptions + 120 payments across 2 temporary plans) w
 
 ## Not started / explicitly deferred (out of scope for this session)
 
-- **Frontend** — done in Stage 19B (see above).
-- **Full-platform regression** — still not run across either 19A or 19B; only the subscriptions/admin surface was re-checked both times (not requested in either session).
-- **Per-plan revenue breakdown** — considered during Stage 19 planning, deliberately left out of the backend to keep the endpoint to a single, currency-grouped aggregate view; Stage 19B's frontend surfaces this gap visibly in the UI rather than working around it.
-- **Index migration** — deferred, not proven necessary (see `EXPLAIN ANALYZE` above); revisit if/when `payments`/`subscriptions` grow to a size where the planner's choice changes.
+- **Frontend** — done in Stage 19B, extended in 19C (see above).
+- **Full-platform regression** — still not run across all of Stage 1–18; only the subscriptions/payments/admin/analytics surface was re-checked across 19A/19B/19C (not requested in any of the three sessions).
+- ~~Per-plan revenue breakdown~~ — **implemented in Stage 19C** (see the top of this document).
+- **Index migration** — still deferred, still not proven necessary after 19C's re-check with the new plan-breakdown query included (see `EXPLAIN ANALYZE` above in both the 19A and 19C sections); revisit if/when `payments`/`subscriptions` grow to a size where the planner's choice changes.

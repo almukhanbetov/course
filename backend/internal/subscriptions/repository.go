@@ -502,3 +502,46 @@ func (r *Repository) GetRevenueAnalytics(ctx context.Context, from, to time.Time
 	}
 	return result, nil
 }
+
+// GetPlanBreakdown is Stage 19C's per-plan aggregate — one row per
+// subscription_plans row, LEFT JOINed through subscriptions to payments so
+// plans with zero subscriptions still appear (with all-zero counts) rather
+// than being silently omitted. COUNT(DISTINCT s.id) guards the
+// subscription-based counts against the payments join's fan-out (a plan
+// could in principle have more payment rows than subscriptions if a future
+// retry flow ever allows more than one payment per subscription — today
+// it's always 1:1, but DISTINCT keeps this correct either way);
+// COUNT(pay.id)/SUM(pay.amount) don't need DISTINCT since each payment row
+// already appears at most once per subscription it belongs to.
+func (r *Repository) GetPlanBreakdown(ctx context.Context, from, to time.Time) ([]PlanRevenue, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+			p.id, p.name, p.currency,
+			COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'active' AND s.expires_at > now()),
+			COUNT(DISTINCT s.id) FILTER (WHERE s.created_at >= $1 AND s.created_at < $2),
+			COUNT(DISTINCT s.id) FILTER (WHERE s.canceled_at >= $1 AND s.canceled_at < $2),
+			COALESCE(SUM(pay.amount) FILTER (WHERE pay.status = 'paid' AND pay.paid_at >= $1 AND pay.paid_at < $2), 0),
+			COUNT(pay.id) FILTER (WHERE pay.status = 'paid' AND pay.paid_at >= $1 AND pay.paid_at < $2)
+		FROM subscription_plans p
+		LEFT JOIN subscriptions s ON s.plan_id = p.id
+		LEFT JOIN payments pay ON pay.subscription_id = s.id
+		GROUP BY p.id, p.name, p.currency
+		ORDER BY p.name
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []PlanRevenue{}
+	for rows.Next() {
+		var pr PlanRevenue
+		if err := rows.Scan(&pr.PlanID, &pr.PlanName, &pr.Currency,
+			&pr.ActiveSubscriptions, &pr.NewSubscriptions, &pr.CanceledSubscriptions,
+			&pr.PaidAmount, &pr.PaidCount); err != nil {
+			return nil, err
+		}
+		result = append(result, pr)
+	}
+	return result, rows.Err()
+}

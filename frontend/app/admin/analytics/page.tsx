@@ -155,10 +155,47 @@ export default async function AdminAnalyticsPage({
         ))
       )}
 
-      <p className="subtitle mt-3">
-        Per-plan revenue breakdown is not available yet — the Stage 19A backend deliberately scoped this endpoint to
-        currency-only aggregation. See <code>STAGE19_PROGRESS.md</code> for details.
-      </p>
+      {analytics.plan_breakdown.length > 0 && (
+        <section className="mt-3">
+          <div className="section-header">
+            <h2>By plan</h2>
+          </div>
+          <p className="subtitle">
+            Revenue here is only counted when a payment&apos;s subscription record still exists and links back to
+            this plan — a payment whose subscription was later deleted (never happens through normal app use) would
+            still count toward the currency totals above but can no longer be attributed to a specific plan, so the
+            two sections can legitimately disagree in that edge case.
+          </p>
+          <div className="admin-table-wrapper">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Plan</th>
+                  <th>Currency</th>
+                  <th>Active</th>
+                  <th>New</th>
+                  <th>Canceled</th>
+                  <th>Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.plan_breakdown.map((pr) => (
+                  <tr key={pr.plan_id}>
+                    <td>{pr.plan_name}</td>
+                    <td>{pr.currency}</td>
+                    <td>{pr.active_subscriptions}</td>
+                    <td>{pr.new_subscriptions}</td>
+                    <td>{pr.canceled_subscriptions}</td>
+                    <td>
+                      {formatPrice({ price_amount: pr.paid_amount, currency: pr.currency })} ({pr.paid_count})
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

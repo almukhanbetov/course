@@ -202,13 +202,18 @@ func (s *Service) ListPaymentsAdmin(ctx context.Context, status string, page, li
 	return s.repo.ListPaymentsAdmin(ctx, status, limit, (page-1)*limit)
 }
 
-// GetRevenueAnalytics returns per-currency revenue/subscription aggregates
-// for [from, to). The handler is responsible for defaulting/validating the
-// range; this method just passes it through to the repository.
+// GetRevenueAnalytics returns per-currency and per-plan revenue/subscription
+// aggregates for [from, to). The handler is responsible for defaulting/
+// validating the range; this method just composes the repository's two
+// independent aggregate queries.
 func (s *Service) GetRevenueAnalytics(ctx context.Context, from, to time.Time) (*RevenueAnalytics, error) {
 	byCurrency, err := s.repo.GetRevenueAnalytics(ctx, from, to)
 	if err != nil {
 		return nil, err
 	}
-	return &RevenueAnalytics{From: from, To: to, ByCurrency: byCurrency}, nil
+	planBreakdown, err := s.repo.GetPlanBreakdown(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return &RevenueAnalytics{From: from, To: to, ByCurrency: byCurrency, PlanBreakdown: planBreakdown}, nil
 }

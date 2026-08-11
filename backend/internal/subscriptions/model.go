@@ -102,10 +102,32 @@ type AdminPaymentSummary struct {
 // (PaidAmount, PaidCount, RefundedAmount, RefundedCount, NewSubscriptions,
 // CanceledSubscriptions); ActiveSubscriptions/MRR are point-in-time as of
 // now, independent of the requested period.
+// PlanBreakdown was deferred out of Stage 19A/19B (see STAGE19_PROGRESS.md)
+// and added in Stage 19C once confirmed to be a small additive read-only
+// aggregation — no schema change, no touch to CreateSubscription/
+// ConfirmPayment. Present only when at least one plan exists.
 type RevenueAnalytics struct {
-	From       time.Time         `json:"from"`
-	To         time.Time         `json:"to"`
-	ByCurrency []CurrencyRevenue `json:"by_currency"`
+	From          time.Time         `json:"from"`
+	To            time.Time         `json:"to"`
+	ByCurrency    []CurrencyRevenue `json:"by_currency"`
+	PlanBreakdown []PlanRevenue     `json:"plan_breakdown"`
+}
+
+// PlanRevenue is one row per subscription_plans row (Stage 19C). Like
+// CurrencyRevenue, each row carries its own Currency and is never combined
+// with a row of a different currency — two plans priced differently just
+// appear as separate rows here too. ActiveSubscriptions is point-in-time (as
+// of now); NewSubscriptions/CanceledSubscriptions/PaidAmount/PaidCount are
+// scoped to [From, To) same as CurrencyRevenue's equivalent fields.
+type PlanRevenue struct {
+	PlanID                uuid.UUID `json:"plan_id"`
+	PlanName              string    `json:"plan_name"`
+	Currency              string    `json:"currency"`
+	ActiveSubscriptions   int       `json:"active_subscriptions"`
+	NewSubscriptions      int       `json:"new_subscriptions"`
+	CanceledSubscriptions int       `json:"canceled_subscriptions"`
+	PaidAmount            int64     `json:"paid_amount"`
+	PaidCount             int       `json:"paid_count"`
 }
 
 // CurrencyRevenue.MRR is a normalized monthly-recurring-revenue estimate:

@@ -451,10 +451,25 @@ export interface CurrencyRevenue {
   mrr: number;
 }
 
+// PlanRevenue mirrors backend/internal/subscriptions/model.go (Stage 19C).
+// Like CurrencyRevenue, each row carries its own currency and is never
+// combined with a row of a different currency.
+export interface PlanRevenue {
+  plan_id: string;
+  plan_name: string;
+  currency: string;
+  active_subscriptions: number;
+  new_subscriptions: number;
+  canceled_subscriptions: number;
+  paid_amount: number;
+  paid_count: number;
+}
+
 export interface AdminRevenueAnalytics {
   from: string;
   to: string;
   by_currency: CurrencyRevenue[];
+  plan_breakdown: PlanRevenue[];
 }
 
 // adminGetRevenueAnalytics throws Error("UNAUTHORIZED")/Error("FORBIDDEN") on
