@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 
 	admin.GET("/subscriptions", h.ListSubscriptionsAdmin)
 	admin.GET("/payments", h.ListPaymentsAdmin)
+	admin.GET("/analytics/revenue", h.GetRevenueAnalytics)
 }
 
 type planRequest struct {
@@ -107,4 +109,40 @@ func (h *Handler) ListPaymentsAdmin(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, pagination.New(list, page, limit, total))
+}
+
+// GetRevenueAnalytics defaults to the trailing 30 days (a "this month"-ish
+// window for MRR-style reporting) when from/to are omitted — mirrors the
+// from/to convention in internal/activity.GetCalendar (YYYY-MM-DD, 400 on an
+// unparseable value).
+func (h *Handler) GetRevenueAnalytics(c *gin.Context) {
+	now := time.Now()
+	from := now.AddDate(0, 0, -30)
+	to := now
+	if v := c.Query("from"); v != "" {
+		parsed, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "INVALID_FROM", "from must be YYYY-MM-DD")
+			return
+		}
+		from = parsed
+	}
+	if v := c.Query("to"); v != "" {
+		parsed, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "INVALID_TO", "to must be YYYY-MM-DD")
+			return
+		}
+		// Query params are date-only, so "to" must include the entire day
+		// it names — advance to the start of the next day for the
+		// exclusive upper bound the queries use ([from, to)).
+		to = parsed.AddDate(0, 0, 1)
+	}
+
+	analytics, err := h.service.GetRevenueAnalytics(c.Request.Context(), from, to)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load revenue analytics")
+		return
+	}
+	c.JSON(http.StatusOK, analytics)
 }

@@ -436,6 +436,50 @@ export interface AdminNotificationJob {
   created_at: string;
 }
 
+// CurrencyRevenue mirrors backend/internal/subscriptions/model.go exactly.
+// Every field is scoped to a single currency — this shape is never reduced
+// to one combined total across currencies, on the backend or here.
+export interface CurrencyRevenue {
+  currency: string;
+  paid_amount: number;
+  paid_count: number;
+  refunded_amount: number;
+  refunded_count: number;
+  new_subscriptions: number;
+  canceled_subscriptions: number;
+  active_subscriptions: number;
+  mrr: number;
+}
+
+export interface AdminRevenueAnalytics {
+  from: string;
+  to: string;
+  by_currency: CurrencyRevenue[];
+}
+
+// adminGetRevenueAnalytics throws Error("UNAUTHORIZED")/Error("FORBIDDEN") on
+// 401/403 specifically (rather than falling through to the generic
+// parseErrorMessage path) so the page can render a distinct message for
+// "your session expired" vs. "you don't have access" vs. any other failure —
+// see app/admin/analytics/page.tsx.
+export async function adminGetRevenueAnalytics(
+  token: string,
+  params: { from?: string; to?: string },
+): Promise<AdminRevenueAnalytics> {
+  const qs = new URLSearchParams();
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/admin/analytics/revenue?${qs}`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (res.status === 403) throw new Error("FORBIDDEN");
+  if (!res.ok) throw new Error(await parseErrorMessage(res));
+  return res.json();
+}
+
 export async function adminListNotificationJobs(
   token: string,
   params: { page?: number; limit?: number; status?: string; channel?: string },

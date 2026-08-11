@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -372,4 +373,132 @@ func (r *Repository) ConfirmPayment(ctx context.Context, paymentID uuid.UUID) (*
 		return nil, nil, err
 	}
 	return payment, subscription, nil
+}
+
+// --- Revenue analytics (admin-only, Stage 19A) ----------------------------
+
+// GetRevenueAnalytics runs three small aggregate queries — payment flow,
+// subscription flow, and point-in-time active/MRR — each GROUP BY currency,
+// and merges them in Go keyed by currency. Every row stands on its own
+// currency; nothing here ever sums across currencies (see CurrencyRevenue's
+// doc comment).
+func (r *Repository) GetRevenueAnalytics(ctx context.Context, from, to time.Time) ([]CurrencyRevenue, error) {
+	byCurrency := map[string]*CurrencyRevenue{}
+
+	get := func(currency string) *CurrencyRevenue {
+		cr, ok := byCurrency[currency]
+		if !ok {
+			cr = &CurrencyRevenue{Currency: currency}
+			byCurrency[currency] = cr
+		}
+		return cr
+	}
+
+	// Payment flow within [from, to), bucketed by paid_at. Note: this
+	// codebase has no separate refunded_at column and no code path that
+	// ever sets status='refunded' today (it is a CHECK-allowed value with
+	// no producer yet), so refunded_amount/refunded_count read zero until
+	// that exists — bucketing by paid_at is still the correct choice once
+	// it does, since a payment must have been paid before it can be
+	// refunded.
+	payRows, err := r.pool.Query(ctx, `
+		SELECT currency,
+			COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0),
+			COUNT(*) FILTER (WHERE status = 'paid'),
+			COALESCE(SUM(amount) FILTER (WHERE status = 'refunded'), 0),
+			COUNT(*) FILTER (WHERE status = 'refunded')
+		FROM payments
+		WHERE status IN ('paid', 'refunded') AND paid_at >= $1 AND paid_at < $2
+		GROUP BY currency
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	for payRows.Next() {
+		var currency string
+		var paidAmount, refundedAmount int64
+		var paidCount, refundedCount int
+		if err := payRows.Scan(&currency, &paidAmount, &paidCount, &refundedAmount, &refundedCount); err != nil {
+			payRows.Close()
+			return nil, err
+		}
+		cr := get(currency)
+		cr.PaidAmount, cr.PaidCount = paidAmount, paidCount
+		cr.RefundedAmount, cr.RefundedCount = refundedAmount, refundedCount
+	}
+	if err := payRows.Err(); err != nil {
+		return nil, err
+	}
+	payRows.Close()
+
+	// Subscription flow within [from, to) — plans carry the currency, not
+	// subscriptions themselves, hence the join.
+	subFlowRows, err := r.pool.Query(ctx, `
+		SELECT p.currency,
+			COUNT(*) FILTER (WHERE s.created_at >= $1 AND s.created_at < $2),
+			COUNT(*) FILTER (WHERE s.canceled_at >= $1 AND s.canceled_at < $2)
+		FROM subscriptions s
+		JOIN subscription_plans p ON p.id = s.plan_id
+		GROUP BY p.currency
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	for subFlowRows.Next() {
+		var currency string
+		var newSubs, canceledSubs int
+		if err := subFlowRows.Scan(&currency, &newSubs, &canceledSubs); err != nil {
+			subFlowRows.Close()
+			return nil, err
+		}
+		cr := get(currency)
+		cr.NewSubscriptions, cr.CanceledSubscriptions = newSubs, canceledSubs
+	}
+	if err := subFlowRows.Err(); err != nil {
+		return nil, err
+	}
+	subFlowRows.Close()
+
+	// Point-in-time (as of now, independent of from/to): active
+	// subscriptions and normalized MRR — see CurrencyRevenue's doc comment
+	// for the 30-day normalization formula.
+	activeRows, err := r.pool.Query(ctx, `
+		SELECT p.currency,
+			COUNT(*),
+			COALESCE(SUM(p.price_amount * 30.0 / p.duration_days), 0)::bigint
+		FROM subscriptions s
+		JOIN subscription_plans p ON p.id = s.plan_id
+		WHERE s.status = 'active' AND s.expires_at > now()
+		GROUP BY p.currency
+	`)
+	if err != nil {
+		return nil, err
+	}
+	for activeRows.Next() {
+		var currency string
+		var active int
+		var mrr int64
+		if err := activeRows.Scan(&currency, &active, &mrr); err != nil {
+			activeRows.Close()
+			return nil, err
+		}
+		cr := get(currency)
+		cr.ActiveSubscriptions, cr.MRR = active, mrr
+	}
+	if err := activeRows.Err(); err != nil {
+		return nil, err
+	}
+	activeRows.Close()
+
+	currencies := make([]string, 0, len(byCurrency))
+	for currency := range byCurrency {
+		currencies = append(currencies, currency)
+	}
+	sort.Strings(currencies)
+
+	result := make([]CurrencyRevenue, 0, len(currencies))
+	for _, currency := range currencies {
+		result = append(result, *byCurrency[currency])
+	}
+	return result, nil
 }

@@ -92,3 +92,34 @@ type AdminPaymentSummary struct {
 	UserEmail string `json:"user_email"`
 	UserName  string `json:"user_name"`
 }
+
+// RevenueAnalytics is the admin-only aggregate view over payments/
+// subscriptions (Stage 19A). ByCurrency is deliberately a slice of
+// per-currency rows, never a single combined total — subscription_plans.
+// currency is not fixed platform-wide (the schema allows a different
+// currency per plan), so summing amounts across currencies would silently
+// produce a meaningless number. From/To bound the flow metrics only
+// (PaidAmount, PaidCount, RefundedAmount, RefundedCount, NewSubscriptions,
+// CanceledSubscriptions); ActiveSubscriptions/MRR are point-in-time as of
+// now, independent of the requested period.
+type RevenueAnalytics struct {
+	From       time.Time         `json:"from"`
+	To         time.Time         `json:"to"`
+	ByCurrency []CurrencyRevenue `json:"by_currency"`
+}
+
+// CurrencyRevenue.MRR is a normalized monthly-recurring-revenue estimate:
+// each active subscription's plan price is scaled to a 30-day period via
+// price_amount * 30 / duration_days, then summed — so a plan billed
+// quarterly or weekly still contributes a comparable "per month" figure.
+type CurrencyRevenue struct {
+	Currency              string `json:"currency"`
+	PaidAmount            int64  `json:"paid_amount"`
+	PaidCount             int    `json:"paid_count"`
+	RefundedAmount        int64  `json:"refunded_amount"`
+	RefundedCount         int    `json:"refunded_count"`
+	NewSubscriptions      int    `json:"new_subscriptions"`
+	CanceledSubscriptions int    `json:"canceled_subscriptions"`
+	ActiveSubscriptions   int    `json:"active_subscriptions"`
+	MRR                   int64  `json:"mrr"`
+}

@@ -5,6 +5,7 @@ import { SidebarShell } from "@/components/shell/SidebarShell";
 import type { SidebarNavGroup } from "@/components/shell/Sidebar";
 import {
   IconAward,
+  IconBarChart,
   IconBell,
   IconCourses,
   IconCreditCard,
@@ -59,6 +60,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         { href: "/admin/plans", label: "Plans", icon: <IconCreditCard size={18} /> },
         { href: "/admin/subscriptions", label: "Subscriptions", icon: <IconCreditCard size={18} /> },
         { href: "/admin/payments", label: "Payments", icon: <IconCreditCard size={18} /> },
+        { href: "/admin/analytics", label: "Analytics", icon: <IconBarChart size={18} /> },
       ],
     },
   ];

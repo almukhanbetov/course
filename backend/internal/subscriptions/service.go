@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -199,4 +200,15 @@ func (s *Service) ListSubscriptionsAdmin(ctx context.Context, status string, pag
 
 func (s *Service) ListPaymentsAdmin(ctx context.Context, status string, page, limit int) ([]AdminPaymentSummary, int, error) {
 	return s.repo.ListPaymentsAdmin(ctx, status, limit, (page-1)*limit)
+}
+
+// GetRevenueAnalytics returns per-currency revenue/subscription aggregates
+// for [from, to). The handler is responsible for defaulting/validating the
+// range; this method just passes it through to the repository.
+func (s *Service) GetRevenueAnalytics(ctx context.Context, from, to time.Time) (*RevenueAnalytics, error) {
+	byCurrency, err := s.repo.GetRevenueAnalytics(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return &RevenueAnalytics{From: from, To: to, ByCurrency: byCurrency}, nil
 }
