@@ -1,0 +1,100 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { getSpeciality, getMyRoadmap } from "@/lib/api";
+import { getSessionToken } from "@/lib/session";
+
+export default async function SpecialityDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+
+  let speciality: Awaited<ReturnType<typeof getSpeciality>>;
+  let error: string | null = null;
+
+  try {
+    speciality = await getSpeciality(id);
+  } catch (err) {
+    error = err instanceof Error ? err.message : "Unknown error";
+    speciality = null;
+  }
+
+  if (error) {
+    return (
+      <main>
+        <p role="alert">Не удалось загрузить специальность: {error}</p>
+      </main>
+    );
+  }
+
+  if (!speciality) {
+    notFound();
+  }
+
+  const token = await getSessionToken();
+  const roadmap = token ? await getMyRoadmap(token, id) : null;
+
+  const progressByCourseId = new Map((roadmap?.courses ?? []).map((c) => [c.course_id, c]));
+
+  return (
+    <main>
+      <Link href="/specialities">← Все специальности</Link>
+      <h1>{speciality.title}</h1>
+      <p>{speciality.description}</p>
+
+      {roadmap && (
+        <div className="status">
+          <p>
+            <strong>Общий прогресс:</strong> {roadmap.progress_percent}%
+            {roadmap.completed ? " · специальность завершена" : ""}
+          </p>
+          <div className="progress-bar">
+            <div className="progress-bar-fill" style={{ width: `${roadmap.progress_percent}%` }} />
+          </div>
+        </div>
+      )}
+
+      {!token && (
+        <p className="subtitle">
+          <Link href="/login">Войдите</Link>, чтобы видеть свой прогресс по этой специальности.
+        </p>
+      )}
+
+      <h2>Roadmap</h2>
+      <ol className="roadmap">
+        {speciality.courses.map((course) => {
+          const progress = progressByCourseId.get(course.id);
+          return (
+            <li key={course.id} className="roadmap-step">
+              <span className={`roadmap-marker${progress?.completed ? " completed" : ""}`}>
+                {progress?.completed ? "✓" : course.position}
+              </span>
+              <div className="roadmap-card">
+                <h3>{course.title}</h3>
+                <p className="course-card-description">{course.description}</p>
+                <div>
+                  <span className="badge">{course.level}</span>
+                  {!course.required && <span className="badge">опционально</span>}
+                </div>
+                {progress && (
+                  <>
+                    <div className="progress-bar">
+                      <div className="progress-bar-fill" style={{ width: `${progress.progress_percent}%` }} />
+                    </div>
+                    <p className="my-course-meta">
+                      {progress.progress_percent}%{progress.completed ? " · завершён" : ""}
+                    </p>
+                  </>
+                )}
+                <Link href={`/courses/${course.id}`} className="nav-link">
+                  Перейти к курсу →
+                </Link>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </main>
+  );
+}

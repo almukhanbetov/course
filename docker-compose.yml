@@ -1,0 +1,238 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_API_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot init: creates the private video bucket, then exits. Never runs
+  # `mc anonymous set public` — the bucket stays private, and every object in
+  # it is only ever reachable through a backend-issued presigned URL.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/${S3_BUCKET} &&
+      echo 'bucket ready: ${S3_BUCKET}'
+      "
+
+  # Dev-only SMTP catcher — accepts any mail on 1025, shows it in a web UI on
+  # 8025. Nothing ever leaves this container; see internal/notifications for
+  # why real e2e tests must never point at a real mail provider.
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT}:1025"
+      - "${MAILPIT_UI_PORT}:8025"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8025/api/v1/info"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: golang:1.25-alpine
+    working_dir: /migrations
+    volumes:
+      - ./backend/migrations:/migrations:ro
+      - go-mod-cache:/root/go/pkg/mod
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    command: ["go", "run", "github.com/pressly/goose/v3/cmd/goose@v3.27.3", "postgres", "${DATABASE_URL}", "-dir", "/migrations", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      BACKEND_PORT: "8080"
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${S3_REGION}
+      VIDEO_MAX_UPLOAD_MB: ${VIDEO_MAX_UPLOAD_MB:-500}
+      VIDEO_SIGNED_URL_TTL: ${VIDEO_SIGNED_URL_TTL:-300}
+      CODE_RUNNER_TIMEOUT_MS: ${CODE_RUNNER_TIMEOUT_MS:-5000}
+      CODE_RUNNER_MEMORY_MB: ${CODE_RUNNER_MEMORY_MB:-128}
+      CODE_RUNNER_MAX_SUBMISSIONS_PER_MINUTE: ${CODE_RUNNER_MAX_SUBMISSIONS_PER_MINUTE:-15}
+      CODE_RUNNER_MAX_CONCURRENT_PER_USER: ${CODE_RUNNER_MAX_CONCURRENT_PER_USER:-3}
+    ports:
+      - "${BACKEND_PORT}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+
+  # Runs the same codebase as `backend` but as a separate binary/image (see
+  # cmd/video-worker) so a multi-minute FFmpeg encode never blocks the HTTP
+  # API. Not a separate service architecture — same DB, same bucket, same
+  # Go module. It has no "ports:" entry: its /healthz is reachable only from
+  # other containers on this compose network, never from the host.
+  video-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${S3_REGION}
+      HLS_SEGMENT_DURATION: ${HLS_SEGMENT_DURATION:-6}
+      VIDEO_JOB_MAX_ATTEMPTS: ${VIDEO_JOB_MAX_ATTEMPTS:-3}
+      VIDEO_JOB_POLL_INTERVAL_SEC: ${VIDEO_JOB_POLL_INTERVAL_SEC:-3}
+      VIDEO_JOB_RETRY_BACKOFF_SEC: ${VIDEO_JOB_RETRY_BACKOFF_SEC:-30}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8090/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Same codebase as `backend` (see cmd/notification-worker), split into its
+  # own binary so a slow SMTP call or the periodic subscription-expiry scan
+  # never competes with the HTTP API. No "ports:" entry — its /healthz is
+  # reachable only inside the compose network.
+  notification-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.notification-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME}
+      NOTIFICATION_JOB_MAX_ATTEMPTS: ${NOTIFICATION_JOB_MAX_ATTEMPTS:-3}
+      NOTIFICATION_JOB_POLL_INTERVAL_SEC: ${NOTIFICATION_JOB_POLL_INTERVAL_SEC:-3}
+      NOTIFICATION_JOB_RETRY_BACKOFF_SEC: ${NOTIFICATION_JOB_RETRY_BACKOFF_SEC:-30}
+      SUBSCRIPTION_EXPIRY_WARNING_DAYS: ${SUBSCRIPTION_EXPIRY_WARNING_DAYS:-3}
+      NOTIFICATION_SCAN_INTERVAL: ${NOTIFICATION_SCAN_INTERVAL:-60}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Executes untrusted student code (see internal/coding/runner.go's package
+  # doc for the full isolation design). This is the ONLY service in this
+  # compose file that ever runs code submitted by a student — the backend,
+  # frontend, and video-worker never do. It gets no "ports:" entry (its
+  # /healthz is internal-only, like video-worker's and notification-worker's),
+  # no Docker socket mount, no --privileged, and no host bind mount. The one
+  # non-default grant is cap_add: [SYS_ADMIN], which is what lets it create
+  # the per-execution user/net/pid namespaces each submission runs inside —
+  # nothing broader than that capability is ever added.
+  code-runner:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.runner
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    # Physical memory is bounded here, at the container level, rather than
+    # per submission via `ulimit -v` — the Go runtime's own startup reserves
+    # ~1GB of virtual address space regardless of actual usage, which makes
+    # a tight per-process RLIMIT_AS reject every Go submission outright (see
+    # internal/coding/runner.go's runSandboxed doc comment for the full
+    # empirical finding). This container-wide cap is still an effective
+    # per-execution bound in practice: cmd/code-runner's poll loop claims
+    # and processes exactly one job at a time (see cmd/code-runner/main.go),
+    # never concurrently, so nothing else in this container competes with
+    # the one submission currently running.
+    mem_limit: 512m
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      CODE_RUNNER_TIMEOUT_MS: ${CODE_RUNNER_TIMEOUT_MS:-5000}
+      CODE_RUNNER_MEMORY_MB: ${CODE_RUNNER_MEMORY_MB:-128}
+      CODE_RUNNER_MAX_OUTPUT_KB: ${CODE_RUNNER_MAX_OUTPUT_KB:-64}
+      CODE_RUNNER_JOB_MAX_ATTEMPTS: ${CODE_RUNNER_JOB_MAX_ATTEMPTS:-2}
+      CODE_RUNNER_JOB_POLL_INTERVAL_SEC: ${CODE_RUNNER_JOB_POLL_INTERVAL_SEC:-2}
+      CODE_RUNNER_JOB_RETRY_BACKOFF_SEC: ${CODE_RUNNER_JOB_RETRY_BACKOFF_SEC:-10}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8092/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      API_INTERNAL_URL: ${API_INTERNAL_URL}
+    ports:
+      - "${FRONTEND_PORT}:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data:
+  go-mod-cache:
+  minio-data:

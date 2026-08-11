@@ -1,0 +1,14 @@
+# Environment
+.env
+
+# Backend (Go)
+backend/bin/
+
+# Frontend (Next.js)
+frontend/node_modules/
+frontend/.next/
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+
+# OS
+.DS_Store

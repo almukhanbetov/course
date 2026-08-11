@@ -1,0 +1,17 @@
+FROM golang:1.25-alpine AS build
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/video-worker ./cmd/video-worker
+
+FROM alpine:3.20
+# ffmpeg is never installed in the api or frontend images — only here, where
+# the actual transcoding happens. Alpine's package bundles both the ffmpeg
+# and ffprobe binaries this worker shells out to.
+RUN apk add --no-cache ca-certificates ffmpeg && \
+    ffmpeg -version && \
+    ffprobe -version
+WORKDIR /app
+COPY --from=build /out/video-worker ./video-worker
+ENTRYPOINT ["./video-worker"]

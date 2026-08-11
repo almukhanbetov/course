@@ -1,0 +1,39 @@
+FROM golang:1.25-alpine AS build
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/code-runner ./cmd/code-runner
+
+FROM alpine:3.20
+# Sandbox tooling: util-linux for a real `unshare` (busybox's built-in
+# unshare doesn't support --map-root-user/--net/--pid together — see
+# internal/coding/runner.go's package doc for why this exact combination
+# was chosen and how it was validated), coreutils for a `timeout` with the
+# GNU -k flag. Then one toolchain per supported language, and nothing else —
+# every package installed here is something student code could in principle
+# reach inside the sandbox's own namespace, so the image is kept as narrow
+# as the three languages actually require.
+RUN apk add --no-cache \
+    util-linux \
+    coreutils \
+    ca-certificates \
+    go \
+    python3 \
+    nodejs \
+    && unshare --version && timeout --version && go version && python3 --version && node --version
+
+WORKDIR /app
+COPY --from=build /out/code-runner ./code-runner
+
+# This process runs as container-root — NOT because it needs host
+# privileges, but because creating the user/net/pid namespaces the sandbox
+# depends on (`unshare --user --map-root-user --net --pid --fork`) requires
+# CAP_SYS_ADMIN, and granting that capability to a non-root OS user while
+# still letting it write /proc/self/uid_map did not work in testing (see
+# internal/coding/runner.go's package doc and the Stage 16 report's trust-
+# boundary section for the full disclosure). The container itself never
+# gets the Docker socket, --privileged, or any host bind mount — see
+# docker-compose.yml's code-runner service, which grants only
+# cap_add: [SYS_ADMIN] and nothing else.
+ENTRYPOINT ["./code-runner"]
