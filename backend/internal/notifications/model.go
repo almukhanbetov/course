@@ -40,6 +40,12 @@ const (
 	// emailed (item 13: "Не отправлять email на каждое достижение"), so
 	// every enqueue call site passes Channels: []string{ChannelInApp}.
 	TypeAchievementEarned = "achievement_earned"
+
+	// TypeQuestionAnswered is Stage 20A's addition (internal/qa) — in-app
+	// only, same minimal-scope reasoning as the assignment-status types
+	// above; only the original question's asker is ever notified, never
+	// every participant in a thread.
+	TypeQuestionAnswered = "question_answered"
 )
 
 // Notification is one row of the in-app read model — see

@@ -25,6 +25,7 @@ import (
 	"lms-backend/internal/learning"
 	"lms-backend/internal/notifications"
 	"lms-backend/internal/ownership"
+	"lms-backend/internal/qa"
 	"lms-backend/internal/recommendations"
 	"lms-backend/internal/reviews"
 	"lms-backend/internal/specialities"
@@ -199,6 +200,15 @@ func main() {
 	wishlistService := wishlist.NewService(wishlistRepo)
 	wishlistHandler := wishlist.NewHandler(wishlistService)
 
+	// Stage 20A: lesson Q&A (internal/qa) — student-facing only this stage
+	// (ask/answer/list/delete-own); instructor/admin moderation routes come
+	// in a later stage. Depends on ownershipService (constructed above,
+	// Stage 14) for the "course-owning instructor may also answer" half of
+	// the answer-authorization rule.
+	qaRepo := qa.NewRepository(pool)
+	qaService := qa.NewService(qaRepo, ownershipService)
+	qaHandler := qa.NewHandler(qaService)
+
 	router := gin.Default()
 
 	v1 := router.Group("/api/v1")
@@ -221,6 +231,7 @@ func main() {
 	achievementsHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
 	recommendationsHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
 	wishlistHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
+	qaHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
 
 	// /instructor/* requires a valid JWT and either the instructor or admin
 	// role — finer-grained per-course ownership is checked inside

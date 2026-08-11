@@ -78,6 +78,8 @@ func renderInApp(notifType string, data map[string]any) renderedInApp {
 		return renderedInApp{"Задание принято", fmt.Sprintf("Ваше задание «%s» по курсу «%s» принято.", str(data, "assignment_title"), str(data, "course_title"))}
 	case TypeAssignmentNeedsRevision:
 		return renderedInApp{"Задание требует доработки", fmt.Sprintf("Задание «%s» по курсу «%s» отправлено на доработку: %s", str(data, "assignment_title"), str(data, "course_title"), str(data, "feedback"))}
+	case TypeQuestionAnswered:
+		return renderedInApp{"Ответ на ваш вопрос", fmt.Sprintf("На ваш вопрос по уроку «%s» (курс «%s») ответили.", str(data, "lesson_title"), str(data, "course_title"))}
 	default:
 		return renderedInApp{"Уведомление", "У вас новое уведомление."}
 	}
