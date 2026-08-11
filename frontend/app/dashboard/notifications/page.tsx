@@ -25,7 +25,7 @@ export default async function NotificationsPage({
   const result = await getMyNotifications(token, page, 20);
 
   return (
-    <main>
+    <>
       <div className="admin-header">
         <h1>Уведомления</h1>
         <form action={markAllNotificationsReadAction}>
@@ -76,6 +76,6 @@ export default async function NotificationsPage({
           <Link href={`/dashboard/notifications?page=${result.page + 1}`}>Далее →</Link>
         )}
       </div>
-    </main>
+    </>
   );
 }

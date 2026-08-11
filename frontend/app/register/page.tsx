@@ -8,12 +8,17 @@ export const metadata: Metadata = {
 
 export default function RegisterPage() {
   return (
-    <main>
-      <h1>Регистрация</h1>
-      <RegisterForm />
-      <p className="subtitle">
-        Уже есть аккаунт? <Link href="/login">Войти</Link>
-      </p>
+    <main className="auth-page">
+      <div className="auth-card">
+        <h1>Регистрация</h1>
+        <p className="subtitle" style={{ marginBottom: 0 }}>
+          Создайте аккаунт и начните обучение
+        </p>
+        <RegisterForm />
+        <p className="subtitle" style={{ marginTop: "1.5rem", marginBottom: 0 }}>
+          Уже есть аккаунт? <Link href="/login">Войти</Link>
+        </p>
+      </div>
     </main>
   );
 }

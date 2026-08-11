@@ -17,7 +17,7 @@ export default async function AchievementsPage() {
   const view = await getMyAchievements(token);
 
   return (
-    <main>
+    <>
       <Link href="/dashboard/analytics">← Моя аналитика</Link>
       <h1>Мои достижения</h1>
 
@@ -48,6 +48,6 @@ export default async function AchievementsPage() {
           </div>
         ))}
       </div>
-    </main>
+    </>
   );
 }

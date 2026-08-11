@@ -22,6 +22,7 @@ export default async function CoursesPage({
   return (
     <main>
       <h1>Курсы</h1>
+      <p className="subtitle">Каталог курсов по программированию, базам данных, DevOps и frontend-разработке.</p>
       <CourseListing searchParams={params} basePath="/courses" />
     </main>
   );

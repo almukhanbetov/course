@@ -34,7 +34,7 @@ export default async function MyCoursesPage() {
   }
 
   return (
-    <main>
+    <>
       <h1>Мои курсы</h1>
 
       {error && <p role="alert">Не удалось загрузить курсы: {error}</p>}
@@ -99,6 +99,6 @@ export default async function MyCoursesPage() {
           );
         })}
       </div>
-    </main>
+    </>
   );
 }

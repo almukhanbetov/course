@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { NavBar } from "@/components/NavBar";
 import { getCurrentUser, getSessionToken } from "@/lib/session";
 import { getUnreadNotificationCount } from "@/lib/api";
+
+const inter = Inter({ subsets: ["latin", "cyrillic"], variable: "--font-sans", display: "swap" });
 
 export const metadata: Metadata = {
   title: "LMS Platform",
@@ -19,10 +22,12 @@ export default async function RootLayout({
   const unreadCount = user && token ? await getUnreadNotificationCount(token) : 0;
 
   return (
-    <html lang="ru">
+    <html lang="ru" className={inter.variable}>
       <body>
-        <NavBar user={user} unreadCount={unreadCount} />
-        {children}
+        <div className="page-shell">
+          <NavBar user={user} unreadCount={unreadCount} />
+          {children}
+        </div>
       </body>
     </html>
   );

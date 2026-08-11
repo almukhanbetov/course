@@ -22,8 +22,7 @@ export default async function SubscriptionDashboardPage() {
   const subscription = await getMySubscription(token);
 
   return (
-    <main>
-      <Link href="/dashboard">← Личный кабинет</Link>
+    <>
       <h1>Моя подписка</h1>
 
       {subscription.active && subscription.plan ? (
@@ -55,6 +54,6 @@ export default async function SubscriptionDashboardPage() {
           </Link>
         </div>
       )}
-    </main>
+    </>
   );
 }

@@ -64,53 +64,61 @@ export default async function CourseDetailPage({
   return (
     <main>
       <Link href="/courses">← Все курсы</Link>
-      <h1>{course.title}</h1>
-      {course.category_name && course.category_slug && (
-        <Link href={`/categories/${course.category_slug}`} className="badge badge-category">
-          {course.category_name}
-        </Link>
-      )}{" "}
-      <span className="badge">{course.level}</span>{" "}
-      <span className={`badge ${isPremium ? "badge-premium" : "badge-free"}`}>
-        {isPremium ? "По подписке" : "Бесплатный"}
-      </span>
-      <div className="rating-summary">
-        <span className="rating-average">{course.rating_average.toFixed(1)}</span>
-        <Rating average={course.rating_average} count={course.rating_count} />
-      </div>
-      <p>{course.description}</p>
 
-      <div className="enroll-cta">
-        {!token && (
-          <Link href="/login" className="nav-link">
-            Войдите, чтобы начать обучение
-          </Link>
-        )}
-        {token && myCourse && (
-          <Link href="/dashboard/courses" className="btn-primary">
-            Продолжить обучение ({myCourse.progress_percent}%)
-          </Link>
-        )}
-        {token && !myCourse && !hasAccess && (
-          <Link href="/pricing" className="btn-primary">
-            Оформить подписку
-          </Link>
-        )}
-        {token && !myCourse && hasAccess && (
-          <form action={enrollAction.bind(null, id)}>
-            <button type="submit" className="btn-primary">
-              Начать обучение
-            </button>
-          </form>
-        )}
-        {/* Wishlist stays available even once enrolled/completed — only
-            successful enrollment auto-clears it (Stage 18 item 20), the
-            student can still add/remove freely otherwise. */}
-        {token && (
-          <span className="wishlist-inline">
-            <WishlistButton courseId={id} initialInWishlist={wishlistIds.includes(id)} />
+      <div className="course-hero">
+        <div className="course-hero-badges">
+          {course.category_name && course.category_slug && (
+            <Link href={`/categories/${course.category_slug}`} className="badge badge-category">
+              {course.category_name}
+            </Link>
+          )}
+          <span className="badge">{course.level}</span>
+          <span className={`badge ${isPremium ? "badge-premium" : "badge-free"}`}>
+            {isPremium ? "По подписке" : "Бесплатный"}
           </span>
-        )}
+        </div>
+
+        <h1>{course.title}</h1>
+
+        <div className="rating-summary">
+          <span className="rating-average">{course.rating_average.toFixed(1)}</span>
+          <Rating average={course.rating_average} count={course.rating_count} />
+        </div>
+
+        <p className="course-hero-description">{course.description}</p>
+
+        <div className="enroll-cta">
+          {!token && (
+            <Link href="/login" className="nav-link">
+              Войдите, чтобы начать обучение
+            </Link>
+          )}
+          {token && myCourse && (
+            <Link href="/dashboard/courses" className="btn-primary">
+              Продолжить обучение ({myCourse.progress_percent}%)
+            </Link>
+          )}
+          {token && !myCourse && !hasAccess && (
+            <Link href="/pricing" className="btn-primary">
+              Оформить подписку
+            </Link>
+          )}
+          {token && !myCourse && hasAccess && (
+            <form action={enrollAction.bind(null, id)}>
+              <button type="submit" className="btn-primary">
+                Начать обучение
+              </button>
+            </form>
+          )}
+          {/* Wishlist stays available even once enrolled/completed — only
+              successful enrollment auto-clears it (Stage 18 item 20), the
+              student can still add/remove freely otherwise. */}
+          {token && (
+            <span className="wishlist-inline">
+              <WishlistButton courseId={id} initialInWishlist={wishlistIds.includes(id)} />
+            </span>
+          )}
+        </div>
       </div>
 
       <h2>Программа курса</h2>

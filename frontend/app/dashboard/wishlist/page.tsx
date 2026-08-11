@@ -19,9 +19,9 @@ export default async function WishlistPage() {
   const items = await getMyWishlist(token).catch(() => []);
 
   return (
-    <main>
-      <Link href="/dashboard">← Личный кабинет</Link>
+    <>
       <h1>Избранное</h1>
+      <p className="subtitle">Курсы, которые вы сохранили, чтобы вернуться к ним позже.</p>
 
       {items.length === 0 ? (
         <div className="empty-state">
@@ -52,6 +52,6 @@ export default async function WishlistPage() {
           ))}
         </div>
       )}
-    </main>
+    </>
   );
 }

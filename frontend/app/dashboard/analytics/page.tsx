@@ -24,7 +24,7 @@ export default async function AnalyticsPage() {
   ]);
 
   return (
-    <main>
+    <>
       {user && <TimezoneSync currentTimezone={user.timezone} />}
       <Link href="/dashboard">← Личный кабинет</Link>
       <h1>Моя аналитика</h1>
@@ -83,6 +83,6 @@ export default async function AnalyticsPage() {
       <p className="mt-3">
         <Link href="/dashboard/achievements">Мои достижения →</Link>
       </p>
-    </main>
+    </>
   );
 }

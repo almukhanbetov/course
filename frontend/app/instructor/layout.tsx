@@ -1,7 +1,9 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
 import { logoutAction } from "@/lib/actions";
+import { SidebarShell } from "@/components/shell/SidebarShell";
+import type { SidebarNavGroup } from "@/components/shell/Sidebar";
+import { IconBarChart, IconClipboard, IconCourses, IconDashboard, IconGraduationCap, IconUsers } from "@/components/shell/icons";
 
 // Server-side gate mirroring admin/layout.tsx — a UX convenience, not the
 // security boundary. Every /api/v1/instructor/* call is independently
@@ -18,32 +20,41 @@ export default async function InstructorLayout({ children }: { children: React.R
     redirect("/dashboard");
   }
 
-  return (
-    <div className="admin-shell">
-      <aside className="admin-sidebar instructor-sidebar">
-        <p className="admin-sidebar-brand instructor-sidebar-brand">LMS Instructor</p>
-        <nav className="admin-nav">
-          <Link href="/instructor">Dashboard</Link>
-          <Link href="/instructor/courses">My Courses</Link>
-          <Link href="/instructor/submissions">Submissions</Link>
-          <Link href="/instructor/students">Students</Link>
-          <Link href="/instructor/analytics">Analytics</Link>
-        </nav>
-      </aside>
+  const groups: SidebarNavGroup[] = [
+    {
+      items: [
+        { href: "/instructor", label: "Dashboard", icon: <IconDashboard size={18} />, exact: true },
+        { href: "/instructor/courses", label: "My Courses", icon: <IconCourses size={18} /> },
+        { href: "/instructor/submissions", label: "Submissions", icon: <IconClipboard size={18} /> },
+        { href: "/instructor/students", label: "Students", icon: <IconUsers size={18} /> },
+        { href: "/instructor/analytics", label: "Analytics", icon: <IconBarChart size={18} /> },
+      ],
+    },
+  ];
 
-      <div className="admin-main">
-        <header className="admin-topbar">
-          <span>
-            {user.first_name} {user.last_name} <span className="badge">{user.role}</span>
-          </span>
-          <form action={logoutAction}>
-            <button type="submit" className="nav-link">
-              Выйти
-            </button>
-          </form>
-        </header>
-        <main className="admin-content">{children}</main>
-      </div>
-    </div>
+  const userSlot = (
+    <>
+      <span>
+        {user.first_name} {user.last_name} <span className="badge">{user.role}</span>
+      </span>
+      <form action={logoutAction}>
+        <button type="submit" className="nav-link">
+          Выйти
+        </button>
+      </form>
+    </>
+  );
+
+  return (
+    <SidebarShell
+      brand="LMS Instructor"
+      brandIcon={<IconGraduationCap size={18} />}
+      sidebarClassName="instructor-sidebar"
+      brandClassName="instructor-sidebar-brand"
+      groups={groups}
+      userSlot={userSlot}
+    >
+      {children}
+    </SidebarShell>
   );
 }

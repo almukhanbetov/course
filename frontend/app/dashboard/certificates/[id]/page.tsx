@@ -27,7 +27,7 @@ export default async function CertificateDetailPage({
   });
 
   return (
-    <main>
+    <>
       <Link href="/dashboard/certificates">← Мои сертификаты</Link>
 
       <div className="certificate-document">
@@ -57,6 +57,6 @@ export default async function CertificateDetailPage({
           </Link>
         </p>
       </div>
-    </main>
+    </>
   );
 }

@@ -14,13 +14,18 @@ export default async function LoginPage({
   const { registered } = await searchParams;
 
   return (
-    <main>
-      <h1>Вход</h1>
-      {registered && <p className="success">Регистрация прошла успешно. Теперь войдите.</p>}
-      <LoginForm />
-      <p className="subtitle">
-        Нет аккаунта? <Link href="/register">Зарегистрироваться</Link>
-      </p>
+    <main className="auth-page">
+      <div className="auth-card">
+        <h1>Вход</h1>
+        <p className="subtitle" style={{ marginBottom: 0 }}>
+          Рады видеть вас снова
+        </p>
+        {registered && <p className="success">Регистрация прошла успешно. Теперь войдите.</p>}
+        <LoginForm />
+        <p className="subtitle" style={{ marginTop: "1.5rem", marginBottom: 0 }}>
+          Нет аккаунта? <Link href="/register">Зарегистрироваться</Link>
+        </p>
+      </div>
     </main>
   );
 }

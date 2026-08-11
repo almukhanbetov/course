@@ -26,7 +26,7 @@ export default async function MyCertificatesPage() {
   }
 
   return (
-    <main>
+    <>
       <h1>Мои сертификаты</h1>
 
       {error && <p role="alert">Не удалось загрузить сертификаты: {error}</p>}
@@ -53,6 +53,6 @@ export default async function MyCertificatesPage() {
           </div>
         ))}
       </div>
-    </main>
+    </>
   );
 }

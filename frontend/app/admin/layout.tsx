@@ -1,7 +1,21 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
 import { logoutAction } from "@/lib/actions";
+import { SidebarShell } from "@/components/shell/SidebarShell";
+import type { SidebarNavGroup } from "@/components/shell/Sidebar";
+import {
+  IconAward,
+  IconBell,
+  IconCourses,
+  IconCreditCard,
+  IconDashboard,
+  IconFileText,
+  IconLayers,
+  IconShield,
+  IconStar,
+  IconTag,
+  IconUsers,
+} from "@/components/shell/icons";
 
 // Server-side gate: a student or instructor (or anyone unauthenticated) is
 // redirected away before any admin page or data fetch runs. This is a UX
@@ -18,40 +32,53 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     redirect("/dashboard");
   }
 
-  return (
-    <div className="admin-shell">
-      <aside className="admin-sidebar">
-        <p className="admin-sidebar-brand">LMS Admin</p>
-        <nav className="admin-nav">
-          <Link href="/admin">Dashboard</Link>
-          <Link href="/admin/users">Users</Link>
-          <Link href="/admin/courses">Courses</Link>
-          <Link href="/admin/course-submissions">Course Submissions</Link>
-          <Link href="/admin/categories">Categories</Link>
-          <Link href="/admin/reviews">Reviews</Link>
-          <Link href="/admin/specialities">Specialities</Link>
-          <Link href="/admin/tests">Tests</Link>
-          <Link href="/admin/certificates">Certificates</Link>
-          <Link href="/admin/plans">Plans</Link>
-          <Link href="/admin/subscriptions">Subscriptions</Link>
-          <Link href="/admin/payments">Payments</Link>
-          <Link href="/admin/notifications">Notifications</Link>
-        </nav>
-      </aside>
+  const groups: SidebarNavGroup[] = [
+    { items: [{ href: "/admin", label: "Dashboard", icon: <IconDashboard size={18} />, exact: true }] },
+    {
+      label: "Каталог",
+      items: [
+        { href: "/admin/courses", label: "Courses", icon: <IconCourses size={18} /> },
+        { href: "/admin/course-submissions", label: "Course Submissions", icon: <IconFileText size={18} /> },
+        { href: "/admin/categories", label: "Categories", icon: <IconTag size={18} /> },
+        { href: "/admin/specialities", label: "Specialities", icon: <IconLayers size={18} /> },
+        { href: "/admin/tests", label: "Tests", icon: <IconFileText size={18} /> },
+      ],
+    },
+    {
+      label: "Сообщество",
+      items: [
+        { href: "/admin/users", label: "Users", icon: <IconUsers size={18} /> },
+        { href: "/admin/reviews", label: "Reviews", icon: <IconStar size={18} /> },
+        { href: "/admin/certificates", label: "Certificates", icon: <IconAward size={18} /> },
+        { href: "/admin/notifications", label: "Notifications", icon: <IconBell size={18} /> },
+      ],
+    },
+    {
+      label: "Биллинг",
+      items: [
+        { href: "/admin/plans", label: "Plans", icon: <IconCreditCard size={18} /> },
+        { href: "/admin/subscriptions", label: "Subscriptions", icon: <IconCreditCard size={18} /> },
+        { href: "/admin/payments", label: "Payments", icon: <IconCreditCard size={18} /> },
+      ],
+    },
+  ];
 
-      <div className="admin-main">
-        <header className="admin-topbar">
-          <span>
-            {user.first_name} {user.last_name} <span className="badge">{user.role}</span>
-          </span>
-          <form action={logoutAction}>
-            <button type="submit" className="nav-link">
-              Выйти
-            </button>
-          </form>
-        </header>
-        <main className="admin-content">{children}</main>
-      </div>
-    </div>
+  const userSlot = (
+    <>
+      <span>
+        {user.first_name} {user.last_name} <span className="badge">{user.role}</span>
+      </span>
+      <form action={logoutAction}>
+        <button type="submit" className="nav-link">
+          Выйти
+        </button>
+      </form>
+    </>
+  );
+
+  return (
+    <SidebarShell brand="LMS Admin" brandIcon={<IconShield size={18} />} groups={groups} userSlot={userSlot}>
+      {children}
+    </SidebarShell>
   );
 }

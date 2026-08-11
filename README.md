@@ -55,3 +55,9 @@ COURSE/
 ├── .env.example
 ├── STAGE18_PROGRESS.md
 └── README.md
+
+## Screenshots
+
+### Dashboard
+
+![Dashboard](docs/screenshots/dashboard.png)
