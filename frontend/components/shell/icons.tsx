@@ -194,3 +194,12 @@ export const IconSearch = (p: IconProps = {}) =>
     </>,
     p
   );
+
+export const IconMessageCircle = (p: IconProps = {}) =>
+  base(
+    <>
+      <path d="M21 12a8.5 8.5 0 0 1-8.5 8.5c-1.3 0-2.5-.3-3.6-.8L3.5 21l1.4-4.6A8.5 8.5 0 1 1 21 12Z" />
+      <path d="M8.5 12h.01M12 12h.01M15.5 12h.01" />
+    </>,
+    p
+  );

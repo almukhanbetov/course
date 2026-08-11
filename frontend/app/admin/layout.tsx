@@ -12,6 +12,7 @@ import {
   IconDashboard,
   IconFileText,
   IconLayers,
+  IconMessageCircle,
   IconShield,
   IconStar,
   IconTag,
@@ -50,6 +51,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       items: [
         { href: "/admin/users", label: "Users", icon: <IconUsers size={18} /> },
         { href: "/admin/reviews", label: "Reviews", icon: <IconStar size={18} /> },
+        { href: "/admin/questions", label: "Q&A", icon: <IconMessageCircle size={18} /> },
         { href: "/admin/certificates", label: "Certificates", icon: <IconAward size={18} /> },
         { href: "/admin/notifications", label: "Notifications", icon: <IconBell size={18} /> },
       ],

@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { SERVER_API_URL, type CodeSubmission } from "@/lib/api";
+import { SERVER_API_URL, type CodeSubmission, type PageResult, type QAAnswer, type QAQuestion, type QAQuestionView } from "@/lib/api";
 import { SESSION_COOKIE, SESSION_MAX_AGE, getSessionToken } from "@/lib/session";
 
 export interface FormState {
@@ -660,4 +660,125 @@ export async function removeFromWishlistAction(courseId: string): Promise<Wishli
   }
   const data = await res.json();
   return { in_wishlist: Boolean(data.in_wishlist) };
+}
+
+// --- Lesson Q&A (Stage 20B1) -------------------------------------------
+// Same shape as the wishlist actions above (return a result object, never
+// redirect) since the lesson page's Q&A section needs to update in place —
+// asking/answering/deleting must not navigate the student away from the
+// video/progress/assignment they're in the middle of.
+
+async function parseQAError(res: Response, fallback: string): Promise<string> {
+  const body = await res.json().catch(() => null);
+  return body?.error?.message ?? fallback;
+}
+
+export interface AskQuestionResult {
+  data?: QAQuestion;
+  error?: string;
+}
+
+export async function askQuestionAction(lessonId: string, body: string): Promise<AskQuestionResult> {
+  const token = await getSessionToken();
+  if (!token) {
+    return { error: "Не авторизован" };
+  }
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/lessons/${lessonId}/questions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return { error: await parseQAError(res, "Не удалось задать вопрос") };
+  }
+  return { data: await res.json() };
+}
+
+export interface AnswerQuestionResult {
+  data?: QAAnswer;
+  error?: string;
+}
+
+export async function answerQuestionAction(questionId: string, body: string): Promise<AnswerQuestionResult> {
+  const token = await getSessionToken();
+  if (!token) {
+    return { error: "Не авторизован" };
+  }
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/questions/${questionId}/answers`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return { error: await parseQAError(res, "Не удалось отправить ответ") };
+  }
+  return { data: await res.json() };
+}
+
+export interface QAMutationResult {
+  ok: boolean;
+  error?: string;
+}
+
+export async function deleteQuestionAction(questionId: string): Promise<QAMutationResult> {
+  const token = await getSessionToken();
+  if (!token) {
+    return { ok: false, error: "Не авторизован" };
+  }
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/questions/${questionId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return { ok: false, error: await parseQAError(res, "Не удалось удалить вопрос") };
+  }
+  return { ok: true };
+}
+
+export async function deleteAnswerAction(answerId: string): Promise<QAMutationResult> {
+  const token = await getSessionToken();
+  if (!token) {
+    return { ok: false, error: "Не авторизован" };
+  }
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/answers/${answerId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return { ok: false, error: await parseQAError(res, "Не удалось удалить ответ") };
+  }
+  return { ok: true };
+}
+
+export interface LoadMoreQuestionsResult {
+  data?: PageResult<QAQuestionView>;
+  error?: string;
+}
+
+// loadMoreQuestionsAction backs the "Показать ещё вопросы" button — the
+// lesson page's initial page of questions is fetched server-side (see
+// app/learn/[courseId]/[lessonId]/page.tsx), this only ever runs for
+// subsequent pages a student explicitly asks for.
+export async function loadMoreQuestionsAction(lessonId: string, page: number): Promise<LoadMoreQuestionsResult> {
+  const token = await getSessionToken();
+  if (!token) {
+    return { error: "Не авторизован" };
+  }
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/lessons/${lessonId}/questions?page=${page}&limit=20`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return { error: await parseQAError(res, "Не удалось загрузить вопросы") };
+  }
+  return { data: await res.json() };
 }

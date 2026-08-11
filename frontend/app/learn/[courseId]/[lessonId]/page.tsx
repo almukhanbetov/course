@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { getLessonAssignment, getLessonCodingExercise, getMyCourseDetail, getMySubmission } from "@/lib/api";
-import { getSessionToken } from "@/lib/session";
+import { getLessonAssignment, getLessonCodingExercise, getLessonQuestions, getMyCourseDetail, getMySubmission } from "@/lib/api";
+import { getCurrentUser, getSessionToken } from "@/lib/session";
 import { completeLessonAction, listCodeAttemptsAction } from "@/lib/actions";
 import { LessonVideoPlayer } from "@/components/LessonVideoPlayer";
 import { AssignmentSection } from "@/components/AssignmentSection";
 import { CodingExerciseSection } from "@/components/CodingExerciseSection";
+import { QASection } from "@/components/QASection";
 
 export default async function LessonPage({
   params,
@@ -49,6 +50,15 @@ export default async function LessonPage({
   const codingAttempts = codingExerciseView
     ? (await listCodeAttemptsAction(codingExerciseView.exercise.id)).attempts ?? []
     : [];
+
+  const currentUser = await getCurrentUser();
+  const questionsPage = await getLessonQuestions(token, lessonId).catch(() => ({
+    items: [],
+    page: 1,
+    limit: 20,
+    total: 0,
+    total_pages: 0,
+  }));
 
   return (
     <main>
@@ -107,6 +117,17 @@ export default async function LessonPage({
               exercise={codingExerciseView.exercise}
               examples={codingExerciseView.examples}
               initialAttempts={codingAttempts}
+            />
+          )}
+
+          {currentUser && (
+            <QASection
+              lessonId={lessonId}
+              currentUserId={currentUser.id}
+              currentUserName={`${currentUser.first_name} ${currentUser.last_name}`.trim()}
+              initialQuestions={questionsPage.items}
+              initialPage={questionsPage.page}
+              initialTotalPages={questionsPage.total_pages}
             />
           )}
         </div>

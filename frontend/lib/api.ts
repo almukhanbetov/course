@@ -1120,3 +1120,57 @@ export function reasonLabel(reason: RecommendationReason, categoryName?: string)
   }
   return REASON_LABELS[reason] ?? reason;
 }
+
+// --- Lesson Q&A (Stage 20A backend, Stage 20B1 frontend) -------------------
+// Mirrors backend/internal/qa/model.go exactly. POST responses from the
+// backend return the bare Question/Answer shape (no display_name/answers) —
+// see lib/actions.ts's askQuestionAction/answerQuestionAction, which
+// synthesize the missing display_name client-side from the already-known
+// current user rather than refetching.
+
+export interface QAAnswer {
+  id: string;
+  question_id: string;
+  user_id: string;
+  body: string;
+  is_instructor_answer: boolean;
+  published: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QAAnswerView extends QAAnswer {
+  display_name: string;
+}
+
+export interface QAQuestion {
+  id: string;
+  lesson_id: string;
+  course_id: string;
+  user_id: string;
+  body: string;
+  published: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QAQuestionView extends QAQuestion {
+  display_name: string;
+  answers: QAAnswerView[];
+}
+
+export async function getLessonQuestions(
+  token: string,
+  lessonId: string,
+  page = 1,
+  limit = 20,
+): Promise<PageResult<QAQuestionView>> {
+  const res = await fetch(`${apiBaseUrl()}/api/v1/lessons/${lessonId}/questions?page=${page}&limit=${limit}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to load questions: ${res.status}`);
+  }
+  return res.json();
+}

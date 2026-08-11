@@ -3,7 +3,15 @@ import { getCurrentUser } from "@/lib/session";
 import { logoutAction } from "@/lib/actions";
 import { SidebarShell } from "@/components/shell/SidebarShell";
 import type { SidebarNavGroup } from "@/components/shell/Sidebar";
-import { IconBarChart, IconClipboard, IconCourses, IconDashboard, IconGraduationCap, IconUsers } from "@/components/shell/icons";
+import {
+  IconBarChart,
+  IconClipboard,
+  IconCourses,
+  IconDashboard,
+  IconGraduationCap,
+  IconMessageCircle,
+  IconUsers,
+} from "@/components/shell/icons";
 
 // Server-side gate mirroring admin/layout.tsx — a UX convenience, not the
 // security boundary. Every /api/v1/instructor/* call is independently
@@ -25,6 +33,7 @@ export default async function InstructorLayout({ children }: { children: React.R
       items: [
         { href: "/instructor", label: "Dashboard", icon: <IconDashboard size={18} />, exact: true },
         { href: "/instructor/courses", label: "My Courses", icon: <IconCourses size={18} /> },
+        { href: "/instructor/questions", label: "Q&A", icon: <IconMessageCircle size={18} /> },
         { href: "/instructor/submissions", label: "Submissions", icon: <IconClipboard size={18} /> },
         { href: "/instructor/students", label: "Students", icon: <IconUsers size={18} /> },
         { href: "/instructor/analytics", label: "Analytics", icon: <IconBarChart size={18} /> },
