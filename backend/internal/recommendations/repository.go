@@ -2,10 +2,14 @@ package recommendations
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrCourseNotFound = errors.New("course not found")
 
 type Repository struct {
 	pool *pgxpool.Pool
@@ -13,6 +17,11 @@ type Repository struct {
 
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
+}
+
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }
 
 const candidateColumns = `
@@ -55,8 +64,15 @@ func scanCandidates(rows interface {
 // ListCandidatesForUser is the personalized candidate set (item 9): published
 // courses, excluding any the user is already enrolled in (completed or not
 // — "not completed" is a hard exclude, "not already enrolled" is honored
-// too since an in-progress course belongs to Continue Learning, not here)
-// and excluding courses the user themselves instructs. One query.
+// too since an in-progress course belongs to Continue Learning, not here),
+// excluding courses the user themselves instructs, and (Stage 23A3)
+// excluding any course the user has given recommendation feedback on
+// (dismiss or not_interested — both are a hard exclude here; the specific
+// action value doesn't change this query, it only ever matters to whatever
+// UI distinguishes the two reasons). Still one query: the exclusion is one
+// more NOT EXISTS clause against recommendation_feedback, the same idiom
+// the enrollment exclusion right above it already uses — no second query,
+// no N+1, no change to how many round trips GetRecommendations makes.
 func (r *Repository) ListCandidatesForUser(ctx context.Context, userID uuid.UUID) ([]Candidate, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+candidateColumns+`
@@ -65,6 +81,7 @@ func (r *Repository) ListCandidatesForUser(ctx context.Context, userID uuid.UUID
 		WHERE c.published = true
 		  AND (c.instructor_id IS NULL OR c.instructor_id != $1)
 		  AND NOT EXISTS (SELECT 1 FROM course_enrollments ce WHERE ce.course_id = c.id AND ce.user_id = $1)
+		  AND NOT EXISTS (SELECT 1 FROM recommendation_feedback rf WHERE rf.course_id = c.id AND rf.user_id = $1)
 	`, userID)
 	if err != nil {
 		return nil, err
@@ -236,4 +253,57 @@ func (r *Repository) ListSimilarCandidates(ctx context.Context, courseID uuid.UU
 		overlaps = append(overlaps, overlap)
 	}
 	return candidates, overlaps, rows.Err()
+}
+
+// --- recommendation feedback (Stage 23A1: storage only, no scoring wiring yet) ---
+
+// UpsertFeedback records (or replaces) a user's feedback action against a
+// course. ON CONFLICT (user_id, course_id) DO UPDATE keeps exactly one row
+// per pair — submitting "dismiss" then later "not_interested" for the same
+// course updates the existing row's action/created_at rather than creating
+// a second one, matching the migration's one-row-per-pair design. A
+// foreign-key violation (course_id doesn't exist) maps to ErrCourseNotFound
+// rather than surfacing the raw pg error, same convention as
+// internal/wishlist and internal/qa's isForeignKeyViolation checks.
+func (r *Repository) UpsertFeedback(ctx context.Context, userID, courseID uuid.UUID, action string) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO recommendation_feedback (user_id, course_id, action)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, course_id) DO UPDATE SET action = EXCLUDED.action, created_at = now()
+	`, userID, courseID, action)
+	if isForeignKeyViolation(err) {
+		return ErrCourseNotFound
+	}
+	return err
+}
+
+// DeleteFeedback removes a user's feedback for a course (the "undo"
+// counterpart of UpsertFeedback) — idempotent by construction, same as
+// internal/wishlist.Remove: deleting a row that doesn't exist is not an
+// error, it just affects zero rows.
+func (r *Repository) DeleteFeedback(ctx context.Context, userID, courseID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM recommendation_feedback WHERE user_id = $1 AND course_id = $2`, userID, courseID)
+	return err
+}
+
+// ListFeedbackCourseIDs returns every course a user has given feedback on,
+// regardless of which action — the shape a future scoring-side exclusion
+// query would consume (not wired into GetRecommendations/GetSimilarCourses
+// this session; see this package's Stage 23A1 scope note).
+func (r *Repository) ListFeedbackCourseIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.pool.Query(ctx, `SELECT course_id FROM recommendation_feedback WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		result = append(result, id)
+	}
+	return result, rows.Err()
 }

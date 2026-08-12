@@ -5,7 +5,7 @@ import { getCurrentUser, getSessionToken } from "@/lib/session";
 import { getContinueLearning, getMyAnalytics, getMyRecommendations } from "@/lib/api";
 import { TimezoneSync } from "@/components/TimezoneSync";
 import { ContinueLearningCard } from "@/components/ContinueLearningCard";
-import { RecommendationCard } from "@/components/RecommendationCard";
+import { PersonalizedRecommendations } from "@/components/PersonalizedRecommendations";
 
 export const metadata: Metadata = {
   title: "Личный кабинет — LMS Platform",
@@ -78,11 +78,7 @@ export default async function DashboardPage() {
               Весь каталог →
             </Link>
           </div>
-          <div className="course-grid">
-            {recommendations.map((rec) => (
-              <RecommendationCard key={rec.course_id} rec={rec} />
-            ))}
-          </div>
+          <PersonalizedRecommendations initialRecommendations={recommendations} />
         </section>
       )}
 

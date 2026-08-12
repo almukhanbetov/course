@@ -56,3 +56,32 @@ const (
 	ReasonNewCourse         = "new_course"
 	ReasonSpecialityOverlap = "speciality_overlap"
 )
+
+// Feedback is one recommendation_feedback row (Stage 23A1) — a user's
+// explicit "not for me" signal against a course, distinct from Reason
+// above: reasons explain why the engine surfaced a course, Feedback is the
+// user telling the engine to stop.
+type Feedback struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	CourseID  uuid.UUID `json:"course_id"`
+	Action    string    `json:"action"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Feedback action vocabulary — bounded, never arbitrary client text. Both
+// values currently produce the identical storage/exclusion effect (see the
+// migration's doc comment: one row per user/course regardless of which
+// action was last submitted); kept as two distinct values because the
+// roadmap and product intent distinguish "dismiss this specific
+// suggestion" from "I'm generally not interested in this course" even
+// though Stage 23A1 doesn't yet give them different downstream behavior.
+const (
+	FeedbackDismiss       = "dismiss"
+	FeedbackNotInterested = "not_interested"
+)
+
+var allowedFeedbackActions = map[string]bool{
+	FeedbackDismiss:       true,
+	FeedbackNotInterested: true,
+}

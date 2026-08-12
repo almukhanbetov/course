@@ -754,6 +754,18 @@ a.recommendation-card:hover {
   font-weight: 500;
 }
 
+.recommendation-feedback-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.recommendation-feedback-error {
+  margin: 0.6rem 0 0;
+  color: var(--danger);
+  font-size: 0.78rem;
+}
+
 .continue-learning-card {
   border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
 }

@@ -662,6 +662,46 @@ export async function removeFromWishlistAction(courseId: string): Promise<Wishli
   return { in_wishlist: Boolean(data.in_wishlist) };
 }
 
+// --- Recommendation feedback (Stage 23A2 backend, Stage 23B1 frontend) -----
+
+export interface RecommendationFeedbackResult {
+  ok: boolean;
+  error?: string;
+}
+
+async function parseRecommendationFeedbackError(res: Response, fallback: string): Promise<string> {
+  const body = await res.json().catch(() => null);
+  return body?.error?.message ?? fallback;
+}
+
+// submitRecommendationFeedbackAction backs the "Скрыть"/"Не интересно"
+// buttons on personalized recommendation cards. Same shape as
+// addToWishlistAction/removeFromWishlistAction above: no client-supplied
+// user id anywhere (the backend reads it from the verified JWT), and the
+// call is idempotent/upsert-safe on the backend side (Stage 23A1's
+// UpsertFeedback), so retrying or switching action for the same course is
+// always safe.
+export async function submitRecommendationFeedbackAction(
+  courseId: string,
+  action: "dismiss" | "not_interested",
+): Promise<RecommendationFeedbackResult> {
+  const token = await getSessionToken();
+  if (!token) {
+    return { ok: false, error: "Не авторизован" };
+  }
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/recommendations/${courseId}/feedback`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return { ok: false, error: await parseRecommendationFeedbackError(res, "Не удалось сохранить отметку") };
+  }
+  return { ok: true };
+}
+
 // --- Lesson Q&A (Stage 20B1) -------------------------------------------
 // Same shape as the wishlist actions above (return a result object, never
 // redirect) since the lesson page's Q&A section needs to update in place —

@@ -46,6 +46,47 @@ func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// ValidationError mirrors every other domain's pattern in this codebase
+// (internal/qa, internal/courses, ...) — a typed error the future HTTP
+// handler layer maps to 400, distinct from a plain internal error.
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	return e.Message
+}
+
+// SubmitFeedback records userID's feedback action against courseID —
+// dismiss or not_interested (model.go's allowedFeedbackActions), never
+// arbitrary text. userID is always the caller's own id, read from the
+// verified JWT by whichever future handler calls this (see
+// GetMyRecommendations' identical authctx.UserID pattern) — this method
+// itself has no way to act on behalf of another user, since there is no
+// alternate id parameter to substitute one in.
+//
+// Storage only this session (Stage 23A1): does not affect
+// GetRecommendations/GetSimilarCourses' output yet — see
+// STAGE23_PROGRESS.md for the deliberate scope boundary.
+func (s *Service) SubmitFeedback(ctx context.Context, userID, courseID uuid.UUID, action string) error {
+	if !allowedFeedbackActions[action] {
+		return &ValidationError{Message: "action must be one of: dismiss, not_interested"}
+	}
+	return s.repo.UpsertFeedback(ctx, userID, courseID, action)
+}
+
+// RemoveFeedback is SubmitFeedback's undo — same self-scoping guarantee.
+func (s *Service) RemoveFeedback(ctx context.Context, userID, courseID uuid.UUID) error {
+	return s.repo.DeleteFeedback(ctx, userID, courseID)
+}
+
+// ListFeedbackCourseIDs is the read-back a future scoring change would
+// consume to exclude these courses from userID's own recommendations —
+// not called from GetRecommendations/GetSimilarCourses this session.
+func (s *Service) ListFeedbackCourseIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	return s.repo.ListFeedbackCourseIDs(ctx, userID)
+}
+
 // baselineScore is the part of the score every candidate gets regardless
 // of any personalization signal — rating, popularity, freshness. This is
 // what makes the new-user fallback (item 16) fall out of the same code
