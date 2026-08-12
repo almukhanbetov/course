@@ -17,10 +17,15 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+// RegisterRoutes wires /auth/register and /auth/login behind the shared
+// rate limiter (Stage 26A1) — every call to either endpoint passes through
+// RateLimiter.Limit first; Register/Login themselves are completely
+// unchanged, since the limiter only ever turns away requests past the
+// threshold, never touching what a normal request receives.
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, rateLimiter *RateLimiter) {
 	auth := rg.Group("/auth")
-	auth.POST("/register", h.Register)
-	auth.POST("/login", h.Login)
+	auth.POST("/register", rateLimiter.Limit("register"), h.Register)
+	auth.POST("/login", rateLimiter.Limit("login"), h.Login)
 }
 
 type registerRequest struct {

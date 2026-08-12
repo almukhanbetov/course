@@ -11,6 +11,11 @@ type Config struct {
 	JWTSecret       string
 	PaymentProvider string
 
+	// JWTAccessTokenTTLMinutes (Stage 26A2) — previously a hardcoded 24h
+	// (1440 min) const in internal/auth/jwt.go; now configurable, same
+	// default value, so tightening it never requires a code change.
+	JWTAccessTokenTTLMinutes int
+
 	// S3Endpoint is used for server-to-storage calls (Put/Delete/HeadBucket),
 	// reachable only from inside the Docker network. S3PublicEndpoint is
 	// used solely when presigning GET URLs, since those are handed to the
@@ -66,6 +71,13 @@ type Config struct {
 	CodeRunnerJobRetryBackoffS     int
 	CodeRunnerMaxSubmissionsPerMin int
 	CodeRunnerMaxConcurrentPerUser int
+
+	// Auth rate limiting (Stage 26A1) — in-process, per-(client IP, endpoint)
+	// fixed-window counter guarding /auth/login and /auth/register against
+	// brute-force/spam. See internal/auth/ratelimit.go's own doc comment for
+	// why in-process state (no Redis, no DB table) is the right call here.
+	AuthRateLimitMaxAttempts int
+	AuthRateLimitWindowSec   int
 }
 
 func Load() Config {
@@ -75,6 +87,8 @@ func Load() Config {
 		DatabaseURL:     getEnv("DATABASE_URL", ""),
 		JWTSecret:       getEnv("JWT_SECRET", ""),
 		PaymentProvider: getEnv("PAYMENT_PROVIDER", "mock"),
+
+		JWTAccessTokenTTLMinutes: getEnvInt("JWT_ACCESS_TOKEN_TTL_MINUTES", 1440),
 
 		S3Endpoint:       s3Endpoint,
 		S3PublicEndpoint: getEnv("S3_PUBLIC_ENDPOINT", s3Endpoint),
@@ -115,6 +129,13 @@ func Load() Config {
 		CodeRunnerJobRetryBackoffS:     getEnvInt("CODE_RUNNER_JOB_RETRY_BACKOFF_SEC", 10),
 		CodeRunnerMaxSubmissionsPerMin: getEnvInt("CODE_RUNNER_MAX_SUBMISSIONS_PER_MINUTE", 15),
 		CodeRunnerMaxConcurrentPerUser: getEnvInt("CODE_RUNNER_MAX_CONCURRENT_PER_USER", 3),
+
+		// Defaults: 10 attempts per 5 minutes per (IP, endpoint) — permissive
+		// enough that a legitimate user retrying a mistyped password a few
+		// times, or a household/NAT sharing one IP, never gets caught, while
+		// still bounding a scripted brute-force burst.
+		AuthRateLimitMaxAttempts: getEnvInt("AUTH_RATE_LIMIT_MAX_ATTEMPTS", 10),
+		AuthRateLimitWindowSec:   getEnvInt("AUTH_RATE_LIMIT_WINDOW_SEC", 300),
 	}
 }
 

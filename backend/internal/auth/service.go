@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"time"
 
 	"lms-backend/internal/users"
 )
@@ -36,12 +37,13 @@ type LoginInput struct {
 }
 
 type Service struct {
-	users     *users.Service
-	jwtSecret string
+	users          *users.Service
+	jwtSecret      string
+	accessTokenTTL time.Duration
 }
 
-func NewService(usersService *users.Service, jwtSecret string) *Service {
-	return &Service{users: usersService, jwtSecret: jwtSecret}
+func NewService(usersService *users.Service, jwtSecret string, accessTokenTTL time.Duration) *Service {
+	return &Service{users: usersService, jwtSecret: jwtSecret, accessTokenTTL: accessTokenTTL}
 }
 
 func (s *Service) Register(ctx context.Context, input RegisterInput) (*users.User, error) {
@@ -84,7 +86,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (string, *users.U
 		return "", nil, ErrInvalidCredentials
 	}
 
-	token, err := GenerateToken(s.jwtSecret, user.ID, user.RoleName)
+	token, err := GenerateToken(s.jwtSecret, user.ID, user.RoleName, s.accessTokenTTL)
 	if err != nil {
 		return "", nil, err
 	}

@@ -70,9 +70,16 @@ func main() {
 	usersService := users.NewService(usersRepo)
 	usersHandler := users.NewHandler(usersService)
 
-	authService := auth.NewService(usersService, cfg.JWTSecret)
+	authService := auth.NewService(usersService, cfg.JWTSecret, time.Duration(cfg.JWTAccessTokenTTLMinutes)*time.Minute)
 	authHandler := auth.NewHandler(authService)
 	authMiddleware := auth.NewMiddleware(cfg.JWTSecret)
+	// Stage 26A1: brute-force/spam guard on /auth/login and /auth/register
+	// only — see internal/auth/ratelimit.go's own doc comment for the
+	// in-process, single-replica design rationale.
+	authRateLimiter := auth.NewRateLimiter(auth.RateLimiterConfig{
+		MaxAttempts: cfg.AuthRateLimitMaxAttempts,
+		Window:      time.Duration(cfg.AuthRateLimitWindowSec) * time.Second,
+	})
 
 	accessService := access.NewService(pool)
 
@@ -238,7 +245,7 @@ func main() {
 	coursesHandler.RegisterRoutes(v1)
 	categoriesHandler.RegisterRoutes(v1)
 	reviewsHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
-	authHandler.RegisterRoutes(v1)
+	authHandler.RegisterRoutes(v1, authRateLimiter)
 	usersHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
 	learningHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
 	specialitiesHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
