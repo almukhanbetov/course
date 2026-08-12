@@ -3,10 +3,12 @@ package reports
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
 
+	"lms-backend/internal/audit"
 	"lms-backend/internal/pagination"
 )
 
@@ -27,11 +29,12 @@ func (e *ValidationError) Error() string {
 var ErrContentNotFound = errors.New("reported content not found")
 
 type Service struct {
-	repo *Repository
+	repo  *Repository
+	audit *audit.Service
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo *Repository, auditService *audit.Service) *Service {
+	return &Service{repo: repo, audit: auditService}
 }
 
 // CreateReport validates content_type and reason, confirms the referenced
@@ -91,9 +94,52 @@ func (s *Service) ListAdmin(ctx context.Context, params AdminListParams) (pagina
 // doc comment) — actually hiding a question/answer/review is a separate
 // action through Stage 21's existing hide/show or the review-publish
 // toggle, deliberately not invoked from here.
-func (s *Service) UpdateStatus(ctx context.Context, id uuid.UUID, status string) (*Report, error) {
+//
+// Stage 25A2: after a successful update, records an audit event.
+// actorUserID/actorRole must come from the verified JWT (authctx) in
+// whichever handler calls this — there is no body field for either in
+// updateStatusRequest to begin with, so there is nothing for a caller to
+// spoof. A failure to write the audit event is logged but never
+// propagated: the real status change already succeeded and must not be
+// undone or reported as failed just because the accountability trail
+// couldn't be appended (matches the roadmap's own Stage 25 requirement,
+// "logging failures never block the underlying action").
+func (s *Service) UpdateStatus(ctx context.Context, actorUserID uuid.UUID, actorRole string, id uuid.UUID, status string) (*Report, error) {
 	if !allowedStatuses[status] {
 		return nil, &ValidationError{Message: "status must be one of: open, resolved, dismissed"}
 	}
-	return s.repo.UpdateStatus(ctx, id, status)
+
+	report, err := s.repo.UpdateStatus(ctx, id, status)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logStatusUpdate(ctx, actorUserID, actorRole, report)
+	return report, nil
+}
+
+func (s *Service) logStatusUpdate(ctx context.Context, actorUserID uuid.UUID, actorRole string, report *Report) {
+	action := audit.ActionReportReopened
+	switch report.Status {
+	case StatusResolved:
+		action = audit.ActionReportResolved
+	case StatusDismissed:
+		action = audit.ActionReportDismissed
+	}
+
+	_, err := s.audit.Log(ctx, audit.LogInput{
+		ActorUserID: &actorUserID,
+		ActorRole:   &actorRole,
+		Action:      action,
+		EntityType:  audit.EntityTypeReport,
+		EntityID:    &report.ID,
+		Metadata: map[string]any{
+			"new_status":   report.Status,
+			"content_type": report.ContentType,
+			"content_id":   report.ContentID,
+		},
+	})
+	if err != nil {
+		log.Printf("audit: failed to log %s for report %s: %v", action, report.ID, err)
+	}
 }

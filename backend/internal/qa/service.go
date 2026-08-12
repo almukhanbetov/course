@@ -3,10 +3,12 @@ package qa
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
 
+	"lms-backend/internal/audit"
 	"lms-backend/internal/ownership"
 	"lms-backend/internal/pagination"
 )
@@ -32,10 +34,11 @@ func (e *ValidationError) Error() string {
 type Service struct {
 	repo      *Repository
 	ownership *ownership.Service
+	audit     *audit.Service
 }
 
-func NewService(repo *Repository, ownershipService *ownership.Service) *Service {
-	return &Service{repo: repo, ownership: ownershipService}
+func NewService(repo *Repository, ownershipService *ownership.Service, auditService *audit.Service) *Service {
+	return &Service{repo: repo, ownership: ownershipService, audit: auditService}
 }
 
 func validateBody(body string) error {
@@ -181,6 +184,12 @@ func (s *Service) DeleteAnswer(ctx context.Context, userID, answerID uuid.UUID) 
 // ErrForbidden. Never deletes: only flips the existing published flag,
 // so ListForLesson's published-only filter is the sole place hidden
 // content stops being visible to students.
+//
+// Stage 25A2: after a successful update, records an audit event via
+// logPublishedChange. userID/role are already sourced from the verified
+// JWT (see handler.go's currentUser) for the authorization check above —
+// the same values are reused for the audit actor, never re-derived from
+// anything client-supplied.
 func (s *Service) SetQuestionPublished(ctx context.Context, userID uuid.UUID, role string, questionID uuid.UUID, published bool) (*Question, error) {
 	question, err := s.repo.GetQuestion(ctx, questionID)
 	if errors.Is(err, ErrNotFound) {
@@ -198,7 +207,13 @@ func (s *Service) SetQuestionPublished(ctx context.Context, userID uuid.UUID, ro
 		return nil, ErrForbidden
 	}
 
-	return s.repo.SetQuestionPublished(ctx, questionID, published)
+	updated, err := s.repo.SetQuestionPublished(ctx, questionID, published)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logPublishedChange(ctx, userID, role, audit.EntityTypeQuestion, questionID, question.CourseID, published)
+	return updated, nil
 }
 
 // SetAnswerPublished mirrors SetQuestionPublished for answers, resolving
@@ -220,5 +235,36 @@ func (s *Service) SetAnswerPublished(ctx context.Context, userID uuid.UUID, role
 		return nil, ErrForbidden
 	}
 
-	return s.repo.SetAnswerPublished(ctx, answerID, published)
+	updated, err := s.repo.SetAnswerPublished(ctx, answerID, published)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logPublishedChange(ctx, userID, role, audit.EntityTypeAnswer, answerID, courseID, published)
+	return updated, nil
+}
+
+// logPublishedChange records a hide/show audit event. A failure to write
+// it is logged but never propagated — the real moderation action already
+// succeeded and must not be undone or reported as failed just because the
+// accountability trail couldn't be appended (matches the roadmap's own
+// Stage 25 requirement: "logging failures never block the underlying
+// action").
+func (s *Service) logPublishedChange(ctx context.Context, actorUserID uuid.UUID, actorRole, entityType string, entityID, courseID uuid.UUID, published bool) {
+	action := audit.ActionContentShown
+	if !published {
+		action = audit.ActionContentHidden
+	}
+
+	_, err := s.audit.Log(ctx, audit.LogInput{
+		ActorUserID: &actorUserID,
+		ActorRole:   &actorRole,
+		Action:      action,
+		EntityType:  entityType,
+		EntityID:    &entityID,
+		Metadata:    map[string]any{"course_id": courseID, "published": published},
+	})
+	if err != nil {
+		log.Printf("audit: failed to log %s for %s %s: %v", action, entityType, entityID, err)
+	}
 }

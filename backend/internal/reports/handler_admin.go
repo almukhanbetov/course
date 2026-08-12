@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"lms-backend/internal/authctx"
 	"lms-backend/internal/pagination"
 )
 
@@ -44,7 +45,20 @@ type updateStatusRequest struct {
 	Status string `json:"status"`
 }
 
+// UpdateReportStatus reads actor identity from the verified JWT only —
+// authctx.UserID/authctx.Role — never from updateStatusRequest, which has
+// no identity field at all (Stage 25A2: this identity is what gets
+// recorded on the resulting audit event, not just used for authorization,
+// which was already enforced upstream by the /admin route group's own
+// middleware before this handler ever runs).
 func (h *Handler) UpdateReportStatus(c *gin.Context) {
+	actorUserID, ok := authctx.UserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid authorization header")
+		return
+	}
+	actorRole, _ := authctx.Role(c)
+
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		respondError(c, http.StatusBadRequest, "INVALID_REPORT_ID", "report id must be a valid UUID")
@@ -57,7 +71,7 @@ func (h *Handler) UpdateReportStatus(c *gin.Context) {
 		return
 	}
 
-	report, err := h.service.UpdateStatus(c.Request.Context(), id, req.Status)
+	report, err := h.service.UpdateStatus(c.Request.Context(), actorUserID, actorRole, id, req.Status)
 	var validationErr *ValidationError
 	switch {
 	case err == nil:

@@ -13,6 +13,7 @@ import (
 	"lms-backend/internal/activity"
 	"lms-backend/internal/admin"
 	"lms-backend/internal/assignments"
+	"lms-backend/internal/audit"
 	"lms-backend/internal/auth"
 	"lms-backend/internal/categories"
 	"lms-backend/internal/certificates"
@@ -201,22 +202,33 @@ func main() {
 	wishlistService := wishlist.NewService(wishlistRepo)
 	wishlistHandler := wishlist.NewHandler(wishlistService)
 
+	// Stage 25A1: platform audit log (internal/audit) — storage +
+	// Service.Log. Stage 25A2 wires it as a dependency into the qa/reports
+	// services below, the first two real call sites. Stage 25A3 adds its
+	// read-only admin surface (GET /admin/audit-log), constructed here and
+	// registered further down alongside every other admin handler.
+	auditRepo := audit.NewRepository(pool)
+	auditService := audit.NewService(auditRepo)
+	auditHandler := audit.NewHandler(auditService)
+
 	// Stage 20A: lesson Q&A (internal/qa) — student-facing only this stage
 	// (ask/answer/list/delete-own); instructor/admin moderation routes come
 	// in a later stage. Depends on ownershipService (constructed above,
 	// Stage 14) for the "course-owning instructor may also answer" half of
-	// the answer-authorization rule.
+	// the answer-authorization rule. Stage 25A2: also depends on
+	// auditService, to record hide/show moderation events.
 	qaRepo := qa.NewRepository(pool)
-	qaService := qa.NewService(qaRepo, ownershipService)
+	qaService := qa.NewService(qaRepo, ownershipService, auditService)
 	qaHandler := qa.NewHandler(qaService)
 
 	// Stage 24A2: content abuse reporting (internal/reports) — one
 	// authenticated POST /reports covering all three reportable content
 	// types (Q&A question/answer, course review) via the polymorphic
 	// (content_type, content_id) storage Stage 24A1 already built. No
-	// admin moderation queue/routes yet.
+	// admin moderation queue/routes yet. Stage 25A2: also depends on
+	// auditService, to record report status-update events.
 	reportsRepo := reports.NewRepository(pool)
-	reportsService := reports.NewService(reportsRepo)
+	reportsService := reports.NewService(reportsRepo, auditService)
 	reportsHandler := reports.NewHandler(reportsService)
 
 	router := gin.Default()
@@ -276,6 +288,7 @@ func main() {
 	notificationsHandler.RegisterAdminRoutes(adminGroup)
 	qaHandler.RegisterAdminRoutes(adminGroup)
 	reportsHandler.RegisterAdminRoutes(adminGroup)
+	auditHandler.RegisterAdminRoutes(adminGroup)
 
 	log.Printf("starting server on port %s", cfg.Port)
 	if err := router.Run(":" + cfg.Port); err != nil {

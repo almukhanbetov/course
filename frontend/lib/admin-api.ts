@@ -297,6 +297,43 @@ export async function adminListReports(
   return res.json();
 }
 
+// AdminAuditLogEntry mirrors backend/internal/audit/model.go's
+// AdminAuditLog exactly (Stage 25A3) — the read-only accountability-trail
+// row shape GET /admin/audit-log returns. actor_user_id/actor_name/
+// actor_role/entity_id are all optional: a NULL actor is a legitimate
+// system-generated event or a since-deleted account (see the backend
+// migration's own doc comment), not missing data to treat as an error.
+export interface AdminAuditLogEntry {
+  id: string;
+  actor_user_id?: string;
+  actor_name?: string;
+  actor_role?: string;
+  action: string;
+  entity_type: string;
+  entity_id?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export async function adminListAuditLog(
+  token: string,
+  params: { page?: number; limit?: number; actor_role?: string; action?: string; entity_type?: string },
+): Promise<PageResult<AdminAuditLogEntry>> {
+  const qs = new URLSearchParams();
+  if (params.page) qs.set("page", String(params.page));
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.actor_role) qs.set("actor_role", params.actor_role);
+  if (params.action) qs.set("action", params.action);
+  if (params.entity_type) qs.set("entity_type", params.entity_type);
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/admin/audit-log?${qs}`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseErrorMessage(res));
+  return res.json();
+}
+
 // adminListCourseSubmissions is the instructor-authoring moderation queue —
 // courses currently pending_review. Deliberately distinct from student
 // course reviews (see internal/reviews) — never call this "reviews" in the
