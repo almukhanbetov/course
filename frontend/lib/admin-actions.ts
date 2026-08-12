@@ -269,6 +269,36 @@ export async function setReviewPublishedAction(reviewId: string, published: bool
   redirect("/admin/reviews");
 }
 
+// --- Content reports (Stage 24B1) ---
+
+export interface UpdateReportStatusResult {
+  ok: boolean;
+  error?: string;
+}
+
+// updateReportStatusAction deliberately does NOT redirect, unlike every
+// other action in this file — Stage 24B1's admin reports page updates the
+// affected row in place via client-side state (see
+// components/AdminReportsQueue.tsx) instead of a full page reload, the
+// same "server action returns a plain result object, the client component
+// owns re-rendering" pattern Stage 20B2/21B2/23B1 already established for
+// QAModerationSection/PersonalizedRecommendations — applied here to an
+// admin-only page for the first time, per this stage's explicit
+// no-full-reload requirement.
+export async function updateReportStatusAction(
+  reportId: string,
+  status: "open" | "resolved" | "dismissed",
+): Promise<UpdateReportStatusResult> {
+  const res = await adminFetch(`/admin/reports/${reportId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) {
+    return { ok: false, error: await parseError(res, "Не удалось изменить статус жалобы") };
+  }
+  return { ok: true };
+}
+
 // --- Specialities ---
 
 function specialityBody(formData: FormData) {

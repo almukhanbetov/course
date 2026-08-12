@@ -27,6 +27,7 @@ import (
 	"lms-backend/internal/ownership"
 	"lms-backend/internal/qa"
 	"lms-backend/internal/recommendations"
+	"lms-backend/internal/reports"
 	"lms-backend/internal/reviews"
 	"lms-backend/internal/specialities"
 	"lms-backend/internal/subscriptions"
@@ -209,6 +210,15 @@ func main() {
 	qaService := qa.NewService(qaRepo, ownershipService)
 	qaHandler := qa.NewHandler(qaService)
 
+	// Stage 24A2: content abuse reporting (internal/reports) — one
+	// authenticated POST /reports covering all three reportable content
+	// types (Q&A question/answer, course review) via the polymorphic
+	// (content_type, content_id) storage Stage 24A1 already built. No
+	// admin moderation queue/routes yet.
+	reportsRepo := reports.NewRepository(pool)
+	reportsService := reports.NewService(reportsRepo)
+	reportsHandler := reports.NewHandler(reportsService)
+
 	router := gin.Default()
 
 	v1 := router.Group("/api/v1")
@@ -232,6 +242,7 @@ func main() {
 	recommendationsHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
 	wishlistHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
 	qaHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
+	reportsHandler.RegisterRoutes(v1, authMiddleware.RequireAuth())
 
 	// /instructor/* requires a valid JWT and either the instructor or admin
 	// role — finer-grained per-course ownership is checked inside
@@ -264,6 +275,7 @@ func main() {
 	videosHandler.RegisterAdminRoutes(adminGroup)
 	notificationsHandler.RegisterAdminRoutes(adminGroup)
 	qaHandler.RegisterAdminRoutes(adminGroup)
+	reportsHandler.RegisterAdminRoutes(adminGroup)
 
 	log.Printf("starting server on port %s", cfg.Port)
 	if err := router.Run(":" + cfg.Port); err != nil {

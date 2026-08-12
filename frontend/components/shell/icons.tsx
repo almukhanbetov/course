@@ -203,3 +203,12 @@ export const IconMessageCircle = (p: IconProps = {}) =>
     </>,
     p
   );
+
+export const IconFlag = (p: IconProps = {}) =>
+  base(
+    <>
+      <path d="M5 3v18" />
+      <path d="M5 4h13l-3 4 3 4H5" />
+    </>,
+    p
+  );

@@ -265,6 +265,38 @@ export async function adminListReviews(
   return res.json();
 }
 
+// AdminContentReport mirrors backend/internal/reports/model.go's
+// AdminReport exactly (Stage 24A3) — the moderation-queue row shape
+// GET /admin/reports returns.
+export interface AdminContentReport {
+  id: string;
+  reporter_user_id: string;
+  reporter_name: string;
+  content_type: "question" | "answer" | "review";
+  content_id: string;
+  reason: string;
+  status: "open" | "resolved" | "dismissed";
+  created_at: string;
+}
+
+export async function adminListReports(
+  token: string,
+  params: { page?: number; limit?: number; status?: string; content_type?: string },
+): Promise<PageResult<AdminContentReport>> {
+  const qs = new URLSearchParams();
+  if (params.page) qs.set("page", String(params.page));
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.status) qs.set("status", params.status);
+  if (params.content_type) qs.set("content_type", params.content_type);
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/admin/reports?${qs}`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseErrorMessage(res));
+  return res.json();
+}
+
 // adminListCourseSubmissions is the instructor-authoring moderation queue —
 // courses currently pending_review. Deliberately distinct from student
 // course reviews (see internal/reviews) — never call this "reviews" in the
