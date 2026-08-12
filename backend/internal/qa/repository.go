@@ -80,19 +80,37 @@ func (r *Repository) GetQuestion(ctx context.Context, id uuid.UUID) (*Question, 
 // questions themselves (with the asker's display name and a window-function
 // total), and one query for every answer belonging to that page's question
 // ids via WHERE question_id = ANY($1), merged here in Go keyed by question
-// id. Both published-only, matching internal/reviews' public-list
-// convention of never surfacing hidden rows outside moderation.
+// id. Published-only, matching internal/reviews' public-list convention of
+// never surfacing hidden rows outside moderation.
 func (r *Repository) ListForLesson(ctx context.Context, lessonID uuid.UUID, limit, offset int) ([]QuestionView, int, error) {
+	return r.listForLesson(ctx, lessonID, limit, offset, false)
+}
+
+// ListForLessonModeration is ListForLesson's moderation counterpart
+// (Stage 21C): identical shape and query structure, but includes hidden
+// (published = false) questions and answers too. Without this, a moderator
+// who hides a question via SetQuestionPublished would lose the ability to
+// find and un-hide it through the moderation pages, since those pages
+// compose their view from this same list call — confirmed live this
+// session (hiding a question made it vanish from the instructor's own
+// moderation view, not just the student-facing one). Callers must
+// authorize via ownership.CanManageCourse before calling this (see
+// Service.ListForLessonModeration) — this method itself has no auth.
+func (r *Repository) ListForLessonModeration(ctx context.Context, lessonID uuid.UUID, limit, offset int) ([]QuestionView, int, error) {
+	return r.listForLesson(ctx, lessonID, limit, offset, true)
+}
+
+func (r *Repository) listForLesson(ctx context.Context, lessonID uuid.UUID, limit, offset int, includeHidden bool) ([]QuestionView, int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT lq.id, lq.lesson_id, lq.course_id, lq.user_id, lq.body, lq.published, lq.created_at, lq.updated_at,
 			TRIM(u.first_name || ' ' || u.last_name),
 			COUNT(*) OVER() AS total
 		FROM lesson_questions lq
 		JOIN users u ON u.id = lq.user_id
-		WHERE lq.lesson_id = $1 AND lq.published = true
+		WHERE lq.lesson_id = $1 AND (lq.published = true OR $4)
 		ORDER BY lq.created_at DESC
 		LIMIT $2 OFFSET $3
-	`, lessonID, limit, offset)
+	`, lessonID, limit, offset, includeHidden)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -125,9 +143,9 @@ func (r *Repository) ListForLesson(ctx context.Context, lessonID uuid.UUID, limi
 			TRIM(u.first_name || ' ' || u.last_name)
 		FROM question_answers qa
 		JOIN users u ON u.id = qa.user_id
-		WHERE qa.question_id = ANY($1) AND qa.published = true
+		WHERE qa.question_id = ANY($1) AND (qa.published = true OR $2)
 		ORDER BY qa.created_at ASC
-	`, questionIDs)
+	`, questionIDs, includeHidden)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -181,15 +199,15 @@ func (r *Repository) CreateAnswer(ctx context.Context, questionID, userID uuid.U
 		return nil, err
 	}
 
-	var askerID uuid.UUID
+	var askerID, lessonID, courseID uuid.UUID
 	var lessonTitle, courseTitle string
 	err = tx.QueryRow(ctx, `
-		SELECT lq.user_id, l.title, c.title
+		SELECT lq.user_id, lq.lesson_id, lq.course_id, l.title, c.title
 		FROM lesson_questions lq
 		JOIN lessons l ON l.id = lq.lesson_id
 		JOIN courses c ON c.id = lq.course_id
 		WHERE lq.id = $1
-	`, questionID).Scan(&askerID, &lessonTitle, &courseTitle)
+	`, questionID).Scan(&askerID, &lessonID, &courseID, &lessonTitle, &courseTitle)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +217,8 @@ func (r *Repository) CreateAnswer(ctx context.Context, questionID, userID uuid.U
 			UserID: askerID,
 			Type:   notifications.TypeQuestionAnswered,
 			Data: map[string]any{
+				"lesson_id":    lessonID,
+				"course_id":    courseID,
 				"lesson_title": lessonTitle,
 				"course_title": courseTitle,
 			},
@@ -241,4 +261,63 @@ func (r *Repository) DeleteAnswer(ctx context.Context, id, userID uuid.UUID) err
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetQuestionPublished is the "hide/show" moderation action Stage 20B2
+// documented as blocked on backend support for. Unlike DeleteQuestion this
+// never destroys content — the row (and its answers, still reachable via
+// the existing FK) stays in place, just excluded from ListForLesson's
+// published-only WHERE clause once hidden. No WHERE user_id here: callers
+// authorize via course ownership (see service.go), not row ownership.
+func (r *Repository) SetQuestionPublished(ctx context.Context, id uuid.UUID, published bool) (*Question, error) {
+	var q Question
+	err := r.pool.QueryRow(ctx, `
+		UPDATE lesson_questions SET published = $2, updated_at = now()
+		WHERE id = $1
+		RETURNING id, lesson_id, course_id, user_id, body, published, created_at, updated_at
+	`, id, published).Scan(&q.ID, &q.LessonID, &q.CourseID, &q.UserID, &q.Body, &q.Published, &q.CreatedAt, &q.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &q, nil
+}
+
+// SetAnswerPublished mirrors SetQuestionPublished for answers.
+func (r *Repository) SetAnswerPublished(ctx context.Context, id uuid.UUID, published bool) (*Answer, error) {
+	var a Answer
+	err := r.pool.QueryRow(ctx, `
+		UPDATE question_answers SET published = $2, updated_at = now()
+		WHERE id = $1
+		RETURNING id, question_id, user_id, body, is_instructor_answer, published, created_at, updated_at
+	`, id, published).Scan(&a.ID, &a.QuestionID, &a.UserID, &a.Body, &a.IsInstructorAnswer, &a.Published, &a.CreatedAt, &a.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// GetAnswerCourseID resolves the course an answer belongs to via its parent
+// question, for the moderation authorization check in service.go — one
+// level deeper than GetQuestion's direct CourseID field.
+func (r *Repository) GetAnswerCourseID(ctx context.Context, answerID uuid.UUID) (uuid.UUID, error) {
+	var courseID uuid.UUID
+	err := r.pool.QueryRow(ctx, `
+		SELECT lq.course_id
+		FROM question_answers qa
+		JOIN lesson_questions lq ON lq.id = qa.question_id
+		WHERE qa.id = $1
+	`, answerID).Scan(&courseID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.UUID{}, ErrNotFound
+	}
+	if err != nil {
+		return uuid.UUID{}, err
+	}
+	return courseID, nil
 }

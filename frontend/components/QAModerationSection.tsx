@@ -2,7 +2,13 @@
 
 import { useState, useTransition } from "react";
 import type { QAAnswerView, QAQuestionView } from "@/lib/api";
-import { answerQuestionAction, deleteAnswerAction, deleteQuestionAction } from "@/lib/actions";
+import {
+  answerQuestionAction,
+  deleteAnswerAction,
+  deleteQuestionAction,
+  setAnswerPublishedAction,
+  setQuestionPublishedAction,
+} from "@/lib/actions";
 
 // One entry per lesson that actually has at least one question — lessons
 // with none are never fetched into this shape by the page (see
@@ -36,15 +42,21 @@ function removeQuestion(groups: ModerationGroup[], questionId: string): Moderati
     .filter((g) => g.questions.length > 0);
 }
 
-// Instructor/admin moderation view (Stage 20B2). Deliberately does NOT
-// include an "ask a question" form (moderators don't ask) and does NOT
-// include a hide/show toggle — the backend has no endpoint for that yet
-// (see STAGE20_PROGRESS.md's Stage 20B2 section), so this only ever wires
-// up actions the existing Stage 20A backend actually authorizes for this
-// caller: answering any question in a course they own/administer (reusing
-// the exact same action as the student-facing QASection), and deleting
-// only their own prior question/answer — never anyone else's, since the
-// backend's delete is strictly own-content-only regardless of role.
+// Instructor/admin moderation view (Stage 20B2, hide/show added in
+// Stage 21B2). Deliberately does NOT include an "ask a question" form
+// (moderators don't ask). Wires up every action the backend actually
+// authorizes for this caller: answering any question in a course they
+// own/administer (reusing the exact same action as the student-facing
+// QASection), deleting only their own prior question/answer (never
+// anyone else's — the backend's delete is strictly own-content-only
+// regardless of role), and now hiding/showing ANY question or answer in
+// the courses this view is already scoped to (own courses for an
+// instructor, every course for admin — the page composing `groups` above
+// already applies that scope, and the backend re-verifies it independently
+// per request via ownership.CanManageCourse, so no extra client-side gate
+// is needed here the way delete's `user_id === currentUserId` check is).
+// Hide/show never deletes content — it flips the same `published` flag
+// this component already displayed as a read-only badge since Stage 20B2.
 export function QAModerationSection({
   groups: initialGroups,
   currentUserId,
@@ -60,6 +72,7 @@ export function QAModerationSection({
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
   const [answerErrors, setAnswerErrors] = useState<Record<string, string>>({});
   const [deleteErrors, setDeleteErrors] = useState<Record<string, string>>({});
+  const [publishErrors, setPublishErrors] = useState<Record<string, string>>({});
 
   const [isPending, startTransition] = useTransition();
   const [pendingKey, setPendingKey] = useState<string | null>(null);
@@ -96,6 +109,37 @@ export function QAModerationSection({
       setGroups((prev) => updateQuestion(prev, questionId, (q) => ({ ...q, answers: [...q.answers, created] })));
       setAnswerDrafts((prev) => ({ ...prev, [questionId]: "" }));
       setOpenAnswerFormId(null);
+    });
+  }
+
+  function handleSetQuestionPublished(questionId: string, nextPublished: boolean) {
+    setPublishErrors((prev) => ({ ...prev, [questionId]: "" }));
+    setPendingKey(`publish-q:${questionId}`);
+    startTransition(async () => {
+      const result = await setQuestionPublishedAction(questionId, nextPublished);
+      if (result.error || !result.data) {
+        setPublishErrors((prev) => ({ ...prev, [questionId]: result.error ?? "Не удалось изменить статус вопроса" }));
+        return;
+      }
+      setGroups((prev) => updateQuestion(prev, questionId, (q) => ({ ...q, published: nextPublished })));
+    });
+  }
+
+  function handleSetAnswerPublished(questionId: string, answerId: string, nextPublished: boolean) {
+    setPublishErrors((prev) => ({ ...prev, [answerId]: "" }));
+    setPendingKey(`publish-a:${answerId}`);
+    startTransition(async () => {
+      const result = await setAnswerPublishedAction(answerId, nextPublished);
+      if (result.error || !result.data) {
+        setPublishErrors((prev) => ({ ...prev, [answerId]: result.error ?? "Не удалось изменить статус ответа" }));
+        return;
+      }
+      setGroups((prev) =>
+        updateQuestion(prev, questionId, (q) => ({
+          ...q,
+          answers: q.answers.map((a) => (a.id === answerId ? { ...a, published: nextPublished } : a)),
+        }))
+      );
     });
   }
 
@@ -138,13 +182,30 @@ export function QAModerationSection({
                     <strong>{q.display_name}</strong> · <span className="qa-answer-body">{formatDate(q.created_at)}</span>{" "}
                     <span className="badge">{q.published ? "Опубликован" : "Скрыт"}</span>
                   </span>
-                  {q.user_id === currentUserId && (
-                    <button type="button" className="btn-small" onClick={() => handleDeleteQuestion(q.id)} disabled={isPending}>
-                      {isPending && pendingKey === `delete-q:${q.id}` ? "Удаление..." : "Удалить"}
+                  <span className="qa-moderation-actions">
+                    <button
+                      type="button"
+                      className="btn-small"
+                      onClick={() => handleSetQuestionPublished(q.id, !q.published)}
+                      disabled={isPending}
+                    >
+                      {isPending && pendingKey === `publish-q:${q.id}`
+                        ? q.published
+                          ? "Скрытие..."
+                          : "Показ..."
+                        : q.published
+                          ? "Скрыть"
+                          : "Показать"}
                     </button>
-                  )}
+                    {q.user_id === currentUserId && (
+                      <button type="button" className="btn-small" onClick={() => handleDeleteQuestion(q.id)} disabled={isPending}>
+                        {isPending && pendingKey === `delete-q:${q.id}` ? "Удаление..." : "Удалить"}
+                      </button>
+                    )}
+                  </span>
                 </div>
                 <p className="qa-question-body">{q.body}</p>
+                {publishErrors[q.id] && <p role="alert">{publishErrors[q.id]}</p>}
                 {deleteErrors[q.id] && <p role="alert">{deleteErrors[q.id]}</p>}
 
                 {q.answers.length > 0 && (
@@ -158,18 +219,35 @@ export function QAModerationSection({
                             {" · "}
                             {formatDate(a.created_at)} · <span className="badge">{a.published ? "Опубликован" : "Скрыт"}</span>
                           </span>
-                          {a.user_id === currentUserId && (
+                          <span className="qa-moderation-actions">
                             <button
                               type="button"
                               className="btn-small"
-                              onClick={() => handleDeleteAnswer(q.id, a.id)}
+                              onClick={() => handleSetAnswerPublished(q.id, a.id, !a.published)}
                               disabled={isPending}
                             >
-                              {isPending && pendingKey === `delete-a:${a.id}` ? "Удаление..." : "Удалить"}
+                              {isPending && pendingKey === `publish-a:${a.id}`
+                                ? a.published
+                                  ? "Скрытие..."
+                                  : "Показ..."
+                                : a.published
+                                  ? "Скрыть"
+                                  : "Показать"}
                             </button>
-                          )}
+                            {a.user_id === currentUserId && (
+                              <button
+                                type="button"
+                                className="btn-small"
+                                onClick={() => handleDeleteAnswer(q.id, a.id)}
+                                disabled={isPending}
+                              >
+                                {isPending && pendingKey === `delete-a:${a.id}` ? "Удаление..." : "Удалить"}
+                              </button>
+                            )}
+                          </span>
                         </div>
                         <p className="qa-answer-body">{a.body}</p>
+                        {publishErrors[a.id] && <p role="alert">{publishErrors[a.id]}</p>}
                         {deleteErrors[a.id] && <p role="alert">{deleteErrors[a.id]}</p>}
                       </li>
                     ))}

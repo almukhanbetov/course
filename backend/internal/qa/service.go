@@ -53,6 +53,36 @@ func (s *Service) ListForLesson(ctx context.Context, lessonID uuid.UUID, page, l
 	return pagination.New(items, page, limit, total), nil
 }
 
+// ListForLessonModeration is the hide/show-aware counterpart to
+// ListForLesson (Stage 21C): requires the same course-ownership check as
+// SetQuestionPublished/SetAnswerPublished (admin: any course; instructor:
+// only courses they own) before returning hidden content alongside
+// published content, so a moderator can actually find and un-hide what
+// they previously hid.
+func (s *Service) ListForLessonModeration(ctx context.Context, userID uuid.UUID, role string, lessonID uuid.UUID, page, limit int) (pagination.Result[QuestionView], error) {
+	courseID, err := s.ownership.CourseIDForLesson(ctx, lessonID)
+	if errors.Is(err, ownership.ErrNotFound) {
+		return pagination.Result[QuestionView]{}, ErrLessonMissing
+	}
+	if err != nil {
+		return pagination.Result[QuestionView]{}, err
+	}
+
+	canManage, err := s.ownership.CanManageCourse(ctx, userID, role, courseID)
+	if err != nil {
+		return pagination.Result[QuestionView]{}, err
+	}
+	if !canManage {
+		return pagination.Result[QuestionView]{}, ErrForbidden
+	}
+
+	items, total, err := s.repo.ListForLessonModeration(ctx, lessonID, limit, pagination.Offset(page, limit))
+	if err != nil {
+		return pagination.Result[QuestionView]{}, err
+	}
+	return pagination.New(items, page, limit, total), nil
+}
+
 // CreateQuestion enforces "asking requires enrollment" (Stage 20 planning
 // decision, consistent with internal/reviews' eligibility model): resolves
 // the lesson's course via ownership.CourseIDForLesson (404 if the lesson
@@ -138,4 +168,57 @@ func (s *Service) DeleteQuestion(ctx context.Context, userID, questionID uuid.UU
 
 func (s *Service) DeleteAnswer(ctx context.Context, userID, answerID uuid.UUID) error {
 	return s.repo.DeleteAnswer(ctx, answerID, userID)
+}
+
+// SetQuestionPublished implements the hide/show moderation action Stage 20
+// deferred (see STAGE20_PROGRESS.md's Stage 20B2 section: "hide/show...
+// require real backend endpoints that don't exist"). Authorization reuses
+// the exact same ownership.CanManageCourse check CreateAnswer already uses
+// for its instructor/admin branch: an admin may moderate any course's
+// questions (CanManageCourse confirms the course exists), a course-owning
+// instructor may moderate only their own course's questions, and anyone
+// else — including a non-owning instructor or any student — gets
+// ErrForbidden. Never deletes: only flips the existing published flag,
+// so ListForLesson's published-only filter is the sole place hidden
+// content stops being visible to students.
+func (s *Service) SetQuestionPublished(ctx context.Context, userID uuid.UUID, role string, questionID uuid.UUID, published bool) (*Question, error) {
+	question, err := s.repo.GetQuestion(ctx, questionID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	canManage, err := s.ownership.CanManageCourse(ctx, userID, role, question.CourseID)
+	if err != nil {
+		return nil, err
+	}
+	if !canManage {
+		return nil, ErrForbidden
+	}
+
+	return s.repo.SetQuestionPublished(ctx, questionID, published)
+}
+
+// SetAnswerPublished mirrors SetQuestionPublished for answers, resolving
+// the owning course one level deeper via GetAnswerCourseID.
+func (s *Service) SetAnswerPublished(ctx context.Context, userID uuid.UUID, role string, answerID uuid.UUID, published bool) (*Answer, error) {
+	courseID, err := s.repo.GetAnswerCourseID(ctx, answerID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	canManage, err := s.ownership.CanManageCourse(ctx, userID, role, courseID)
+	if err != nil {
+		return nil, err
+	}
+	if !canManage {
+		return nil, ErrForbidden
+	}
+
+	return s.repo.SetAnswerPublished(ctx, answerID, published)
 }

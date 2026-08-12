@@ -32,6 +32,31 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, requireAuth gin.HandlerFun
 	rg.DELETE("/answers/:id", requireAuth, h.DeleteAnswer)
 }
 
+// RegisterInstructorRoutes and RegisterAdminRoutes both wire the same
+// hide/show moderation actions (SetQuestionPublished/SetAnswerPublished)
+// onto their respective route groups — there's no route-group-specific
+// logic to duplicate, since the handler re-derives authorization per
+// request from the verified JWT via the service's ownership.CanManageCourse
+// check, exactly like CreateAnswer's existing three-way rule already does
+// regardless of which surface calls it.
+//
+// Routes live under "/qa/questions/:id" and "/qa/answers/:id" — NOT the
+// bare "/questions/:id"/"/answers/:id" internal/tests already registers on
+// both the instructor and admin groups for quiz-authoring (see this
+// package's doc comment on the naming ambiguity). Reusing the bare path
+// here would panic at router setup with a route conflict.
+func (h *Handler) RegisterInstructorRoutes(rg *gin.RouterGroup) {
+	rg.GET("/qa/lessons/:id/questions", h.ListQuestionsModeration)
+	rg.PUT("/qa/questions/:id", h.SetQuestionPublished)
+	rg.PUT("/qa/answers/:id", h.SetAnswerPublished)
+}
+
+func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
+	rg.GET("/qa/lessons/:id/questions", h.ListQuestionsModeration)
+	rg.PUT("/qa/questions/:id", h.SetQuestionPublished)
+	rg.PUT("/qa/answers/:id", h.SetAnswerPublished)
+}
+
 func respondError(c *gin.Context, status int, code, message string) {
 	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message}})
 }
@@ -165,6 +190,97 @@ func (h *Handler) DeleteQuestion(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// ListQuestionsModeration is ListQuestions' moderation counterpart
+// (Stage 21C): same shape, but includes hidden content, and requires
+// course-management authorization instead of bare auth. Backs the
+// instructor/admin moderation pages so hiding a question doesn't also make
+// it disappear from the moderator's own view.
+func (h *Handler) ListQuestionsModeration(c *gin.Context) {
+	userID, role, ok := currentUser(c)
+	if !ok {
+		return
+	}
+	lessonID, ok := idParam(c, "id", "INVALID_LESSON_ID", "lesson id must be a valid UUID")
+	if !ok {
+		return
+	}
+	page, limit := pagination.ParseParams(c.Query("page"), c.Query("limit"))
+
+	result, err := h.service.ListForLessonModeration(c.Request.Context(), userID, role, lessonID, page, limit)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, result)
+	case errors.Is(err, ErrLessonMissing):
+		respondError(c, http.StatusNotFound, "LESSON_NOT_FOUND", "lesson not found")
+	case errors.Is(err, ErrForbidden):
+		respondError(c, http.StatusForbidden, "FORBIDDEN", "you may only view moderation data for courses you own, or as an admin")
+	default:
+		respondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list questions")
+	}
+}
+
+type publishedRequest struct {
+	Published bool `json:"published"`
+}
+
+func (h *Handler) SetQuestionPublished(c *gin.Context) {
+	userID, role, ok := currentUser(c)
+	if !ok {
+		return
+	}
+	questionID, ok := idParam(c, "id", "INVALID_QUESTION_ID", "question id must be a valid UUID")
+	if !ok {
+		return
+	}
+
+	var req publishedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "INVALID_BODY", "request body is invalid")
+		return
+	}
+
+	question, err := h.service.SetQuestionPublished(c.Request.Context(), userID, role, questionID, req.Published)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, question)
+	case errors.Is(err, ErrNotFound):
+		respondError(c, http.StatusNotFound, "QUESTION_NOT_FOUND", "question not found")
+	case errors.Is(err, ErrForbidden):
+		respondError(c, http.StatusForbidden, "FORBIDDEN", "you may only moderate questions in courses you own, or as an admin")
+	default:
+		respondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update question")
+	}
+}
+
+func (h *Handler) SetAnswerPublished(c *gin.Context) {
+	userID, role, ok := currentUser(c)
+	if !ok {
+		return
+	}
+	answerID, ok := idParam(c, "id", "INVALID_ANSWER_ID", "answer id must be a valid UUID")
+	if !ok {
+		return
+	}
+
+	var req publishedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "INVALID_BODY", "request body is invalid")
+		return
+	}
+
+	answer, err := h.service.SetAnswerPublished(c.Request.Context(), userID, role, answerID, req.Published)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, answer)
+	case errors.Is(err, ErrNotFound):
+		respondError(c, http.StatusNotFound, "ANSWER_NOT_FOUND", "answer not found")
+	case errors.Is(err, ErrForbidden):
+		respondError(c, http.StatusForbidden, "FORBIDDEN", "you may only moderate answers in courses you own, or as an admin")
+	default:
+		respondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update answer")
+	}
 }
 
 func (h *Handler) DeleteAnswer(c *gin.Context) {

@@ -860,6 +860,10 @@ export function notificationActionLink(n: AppNotification): string | null {
       return "/dashboard/subscription";
     case "course_announcement":
       return typeof data.course_id === "string" ? `/courses/${data.course_id}` : "/courses";
+    case "question_answered":
+      return typeof data.course_id === "string" && typeof data.lesson_id === "string"
+        ? `/learn/${data.course_id}/${data.lesson_id}`
+        : null;
     default:
       return null;
   }
@@ -1166,6 +1170,32 @@ export async function getLessonQuestions(
   limit = 20,
 ): Promise<PageResult<QAQuestionView>> {
   const res = await fetch(`${apiBaseUrl()}/api/v1/lessons/${lessonId}/questions?page=${page}&limit=${limit}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to load questions: ${res.status}`);
+  }
+  return res.json();
+}
+
+// getLessonQuestionsModeration is getLessonQuestions' moderation
+// counterpart (Stage 21C): hits the instructor/admin-authorized endpoint
+// that includes hidden (published: false) content, so the moderation pages
+// can actually find and un-hide what they previously hid — the plain
+// public endpoint above filters hidden content out, which made a hidden
+// question disappear from the moderator's own view too (confirmed live
+// this session). Calls the "/instructor" path for both instructor and
+// admin callers, same reasoning as setQuestionPublishedAction/
+// setAnswerPublishedAction in lib/actions.ts: that route group accepts
+// both roles, and the backend re-derives real authorization per request.
+export async function getLessonQuestionsModeration(
+  token: string,
+  lessonId: string,
+  page = 1,
+  limit = 20,
+): Promise<PageResult<QAQuestionView>> {
+  const res = await fetch(`${apiBaseUrl()}/api/v1/instructor/qa/lessons/${lessonId}/questions?page=${page}&limit=${limit}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });

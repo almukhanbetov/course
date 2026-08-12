@@ -2202,6 +2202,12 @@ a.recommendation-card:hover {
   margin: 0.1rem 0 0;
 }
 
+.qa-moderation-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 @media (max-width: 720px) {
   main {
     padding: 2rem 1.25rem 3.5rem;

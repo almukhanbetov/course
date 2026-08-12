@@ -758,6 +758,60 @@ export async function deleteAnswerAction(answerId: string): Promise<QAMutationRe
   return { ok: true };
 }
 
+export interface SetQuestionPublishedResult {
+  data?: QAQuestion;
+  error?: string;
+}
+
+// setQuestionPublishedAction backs the moderation hide/show toggle (Stage
+// 21B1's backend). Deliberately calls the "/instructor" route, not
+// "/admin" — that group's RequireAnyRole("instructor", "admin") accepts
+// both callers, and the backend's own ownership.CanManageCourse check
+// (admin: any course; instructor: only courses they own) is what actually
+// decides authorization, exactly like askQuestionAction/answerQuestionAction
+// above already share one action across both moderation pages instead of
+// needing a role-specific variant.
+export async function setQuestionPublishedAction(questionId: string, published: boolean): Promise<SetQuestionPublishedResult> {
+  const token = await getSessionToken();
+  if (!token) {
+    return { error: "Не авторизован" };
+  }
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/instructor/qa/questions/${questionId}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ published }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return { error: await parseQAError(res, "Не удалось изменить статус вопроса") };
+  }
+  return { data: await res.json() };
+}
+
+export interface SetAnswerPublishedResult {
+  data?: QAAnswer;
+  error?: string;
+}
+
+export async function setAnswerPublishedAction(answerId: string, published: boolean): Promise<SetAnswerPublishedResult> {
+  const token = await getSessionToken();
+  if (!token) {
+    return { error: "Не авторизован" };
+  }
+
+  const res = await fetch(`${SERVER_API_URL}/api/v1/instructor/qa/answers/${answerId}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ published }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return { error: await parseQAError(res, "Не удалось изменить статус ответа") };
+  }
+  return { data: await res.json() };
+}
+
 export interface LoadMoreQuestionsResult {
   data?: PageResult<QAQuestionView>;
   error?: string;

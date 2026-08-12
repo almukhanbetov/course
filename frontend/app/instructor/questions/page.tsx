@@ -2,22 +2,24 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentUser, getSessionToken } from "@/lib/session";
 import { instructorGetCourse, instructorListCourses } from "@/lib/instructor-api";
-import { getLessonQuestions } from "@/lib/api";
+import { getLessonQuestionsModeration } from "@/lib/api";
 import { QAModerationSection, type ModerationGroup } from "@/components/QAModerationSection";
 
 export const metadata: Metadata = {
   title: "Q&A — Instructor",
 };
 
-// Reuses the same GET /lessons/:id/questions endpoint the student-facing
-// lesson page uses (Stage 20A never gated that read behind ownership or
-// enrollment — only auth), composed here across every lesson of every
-// course this instructor owns. There is no dedicated "list Q&A for my
-// courses" backend endpoint (see STAGE20_PROGRESS.md's Stage 20B2 section
-// for why that was deliberately not added this session), so this page
-// fetches course -> lesson -> questions in application code instead of a
-// single query — acceptable at this project's demo-data scale (a handful
-// of courses/lessons), not something this session claims scales further.
+// Uses GET /instructor/qa/lessons/:id/questions (Stage 21C) — the
+// moderation-aware counterpart of the student-facing endpoint, which
+// includes hidden content so a moderator can find and un-hide what they
+// previously hid via Stage 21B1/21B2's Скрыть/Показать buttons. Composed
+// here across every lesson of every course this instructor owns. There is
+// no dedicated "list Q&A for my courses" backend endpoint (see
+// STAGE20_PROGRESS.md's Stage 20B2 section for why that was deliberately
+// not added), so this page fetches course -> lesson -> questions in
+// application code instead of a single query — acceptable at this
+// project's demo-data scale (a handful of courses/lessons), not something
+// this session claims scales further.
 export default async function InstructorQuestionsPage() {
   const token = await getSessionToken();
   if (!token) {
@@ -52,7 +54,7 @@ export default async function InstructorQuestionsPage() {
 
     const rawGroups = await Promise.all(
       lessonRefs.map(async (ref) => {
-        const page = await getLessonQuestions(token, ref.lessonId).catch(() => null);
+        const page = await getLessonQuestionsModeration(token, ref.lessonId).catch(() => null);
         if (!page || page.items.length === 0) return null;
         return { ...ref, questions: page.items };
       }),

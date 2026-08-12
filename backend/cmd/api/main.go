@@ -241,6 +241,7 @@ func main() {
 	instructorHandler.RegisterRoutes(instructorGroup)
 	assignmentsHandler.RegisterInstructorRoutes(instructorGroup)
 	codingHandler.RegisterInstructorRoutes(instructorGroup)
+	qaHandler.RegisterInstructorRoutes(instructorGroup)
 
 	// Every /admin/* route requires a valid JWT AND the admin role, checked
 	// here on the backend — this is the single choke point all admin
@@ -262,6 +263,7 @@ func main() {
 	subscriptionsHandler.RegisterAdminRoutes(adminGroup)
 	videosHandler.RegisterAdminRoutes(adminGroup)
 	notificationsHandler.RegisterAdminRoutes(adminGroup)
+	qaHandler.RegisterAdminRoutes(adminGroup)
 
 	log.Printf("starting server on port %s", cfg.Port)
 	if err := router.Run(":" + cfg.Port); err != nil {

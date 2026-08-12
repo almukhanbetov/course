@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentUser, getSessionToken } from "@/lib/session";
 import { adminGetCourse, adminListCourses } from "@/lib/admin-api";
-import { getLessonQuestions } from "@/lib/api";
+import { getLessonQuestionsModeration } from "@/lib/api";
 import { QAModerationSection, type ModerationGroup } from "@/components/QAModerationSection";
 
 export const metadata: Metadata = {
@@ -11,9 +11,10 @@ export const metadata: Metadata = {
 
 // Same composition as app/instructor/questions/page.tsx, scoped to every
 // course platform-wide instead of one instructor's own — see that page's
-// doc comment for why this is application-level composition of the
-// existing GET /lessons/:id/questions rather than a dedicated backend
-// endpoint (none exists yet for Stage 20B2).
+// doc comment for why this is application-level composition of
+// GET /instructor/qa/lessons/:id/questions (Stage 21C's moderation-aware,
+// hidden-content-inclusive endpoint) rather than a dedicated backend
+// aggregate endpoint.
 export default async function AdminQuestionsPage() {
   const token = await getSessionToken();
   if (!token) {
@@ -48,7 +49,7 @@ export default async function AdminQuestionsPage() {
 
     const rawGroups = await Promise.all(
       lessonRefs.map(async (ref) => {
-        const page = await getLessonQuestions(token, ref.lessonId).catch(() => null);
+        const page = await getLessonQuestionsModeration(token, ref.lessonId).catch(() => null);
         if (!page || page.items.length === 0) return null;
         return { ...ref, questions: page.items };
       }),
