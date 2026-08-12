@@ -281,6 +281,36 @@ export async function getCourses(params: CourseListParams = {}): Promise<PageRes
   return res.json();
 }
 
+// CourseSuggestion mirrors backend/internal/courses/model.go's
+// CourseSuggestion exactly (Stage 22A1) — the narrow shape
+// GET /search/suggestions returns: just enough to render and link a
+// suggestion, not the full Course shape getCourses returns.
+export interface CourseSuggestion {
+  id: string;
+  title: string;
+  slug: string;
+  category_name?: string;
+}
+
+// getCourseSuggestions backs search-as-you-type (Stage 22B1). Public,
+// unauthenticated, same as getCourses/getCategories above — callable from
+// both server and client code since apiBaseUrl() resolves to the right
+// base URL either way. Accepts an optional AbortSignal so the autocomplete
+// component can cancel a stale in-flight request when the user keeps
+// typing, rather than risking an older response overwriting a newer one.
+export async function getCourseSuggestions(query: string, signal?: AbortSignal): Promise<CourseSuggestion[]> {
+  const res = await fetch(`${apiBaseUrl()}/api/v1/search/suggestions?q=${encodeURIComponent(query)}`, {
+    cache: "no-store",
+    signal,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to load suggestions: ${res.status}`);
+  }
+
+  return res.json();
+}
+
 export async function getCategories(): Promise<Category[]> {
   const res = await fetch(`${apiBaseUrl()}/api/v1/categories`, {
     cache: "no-store",

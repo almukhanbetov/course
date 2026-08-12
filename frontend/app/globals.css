@@ -1608,6 +1608,68 @@ a.recommendation-card:hover {
   border-color: var(--accent);
 }
 
+.search-autocomplete {
+  position: relative;
+  flex: 1 1 220px;
+}
+
+.search-autocomplete input[type="search"] {
+  width: 100%;
+}
+
+.search-autocomplete-dropdown {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0.35rem;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.search-autocomplete-status {
+  padding: 0.5rem 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.search-autocomplete-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.search-autocomplete-item:hover,
+.search-autocomplete-item.is-highlighted {
+  background: var(--bg-elevated);
+}
+
+.search-autocomplete-title {
+  font-size: 0.92rem;
+}
+
+.search-autocomplete-category {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 .badge-category {
   border-color: color-mix(in srgb, var(--info) 45%, var(--border));
   color: var(--info);

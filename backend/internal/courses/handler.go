@@ -25,6 +25,7 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/courses", h.ListCourses)
 	rg.GET("/courses/:id", h.GetCourse)
+	rg.GET("/search/suggestions", h.SuggestCourses)
 }
 
 type courseRequest struct {
@@ -75,6 +76,23 @@ func (h *Handler) ListCourses(c *gin.Context) {
 	default:
 		respondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list courses")
 	}
+}
+
+// SuggestCourses backs search-as-you-type (Stage 22A2): a lightweight,
+// public, unauthenticated endpoint wired directly onto Service.SuggestCourses
+// (Stage 22A1) — no new validation here, since the service already owns
+// normalizing/bounding the raw "q" query param (trim, empty-query
+// short-circuit to zero results, length cap) exactly the way ListCourses
+// hands its own "q" straight to SearchCourses. A missing/empty "q" is not
+// an error: it safely returns an empty list, matching a dropdown with
+// nothing typed yet having nothing to suggest.
+func (h *Handler) SuggestCourses(c *gin.Context) {
+	suggestions, err := h.service.SuggestCourses(c.Request.Context(), c.Query("q"))
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load suggestions")
+		return
+	}
+	c.JSON(http.StatusOK, suggestions)
 }
 
 func (h *Handler) GetCourse(c *gin.Context) {

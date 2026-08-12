@@ -1,4 +1,5 @@
 import type { Category } from "@/lib/api";
+import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 
 interface Props {
   categories: Category[];
@@ -7,13 +8,16 @@ interface Props {
   showCategoryFilter: boolean;
 }
 
-// A plain GET <form> — no client JS, no per-keystroke fetches. Filters only
-// take effect on submit (Enter or the button), and the resulting URL is
-// fully shareable/bookmarkable and works with the back button.
+// A plain GET <form> — filters only take effect on submit (Enter or the
+// button), and the resulting URL is fully shareable/bookmarkable and works
+// with the back button. The search input itself is progressively enhanced
+// by SearchAutocomplete (Stage 22B1) with a suggestions dropdown, but stays
+// inside this same form under the same name="q" — submitting still works
+// exactly as before, autocomplete is purely additive.
 export function CourseFilters({ categories, basePath, current, showCategoryFilter }: Props) {
   return (
     <form action={basePath} method="GET" className="filter-bar">
-      <input type="search" name="q" placeholder="Поиск по курсам..." defaultValue={current.q} aria-label="Поиск" />
+      <SearchAutocomplete defaultValue={current.q} />
 
       {showCategoryFilter && (
         <select name="category" defaultValue={current.category} aria-label="Категория">

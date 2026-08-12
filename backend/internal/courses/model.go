@@ -127,6 +127,19 @@ type ListCoursesParams struct {
 	Limit        int
 }
 
+// CourseSuggestion is the deliberately narrow shape for search-as-you-type
+// (Stage 22A1) — just enough to render and link a suggestion (title +
+// slug for the URL, category name for a subtitle), not the full Course
+// shape SearchCourses returns. No rating/instructor/description: those
+// cost the same LATERAL join SearchCourses already pays for a full result
+// page, which a per-keystroke suggestion query should never pay.
+type CourseSuggestion struct {
+	ID           uuid.UUID `json:"id"`
+	Title        string    `json:"title"`
+	Slug         string    `json:"slug"`
+	CategoryName *string   `json:"category_name,omitempty"`
+}
+
 type ModuleInput struct {
 	Title string
 }

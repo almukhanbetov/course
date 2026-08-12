@@ -97,29 +97,34 @@ func courseSortClause(sort string) string {
 	}
 }
 
+// splitSearchQuery implements the shared "3+ characters use
+// websearch_to_tsquery against the GIN-indexed search_vector column
+// (title weighted above description); 1-2 characters fall back to a plain
+// ILIKE on title" convention SearchCourses established — very short input
+// rarely tokenizes into a usable tsquery. Reused as-is by SuggestCourses so
+// both entry points rank/match the same query text identically. At
+// real-world catalog scale this ILIKE fallback should become a pg_trgm
+// trigram index instead; the current demo catalog is small enough that the
+// resulting sequential scan is inconsequential (see both callers' own
+// EXPLAIN ANALYZE verification).
+func splitSearchQuery(q string) (tsQuery *string, ilikeQuery string) {
+	if q == "" {
+		return nil, ""
+	}
+	if len([]rune(q)) >= 3 {
+		return &q, ""
+	}
+	return nil, q
+}
+
 // SearchCourses is the public catalog — published courses only, filtered by
 // category/level/access_type, searched via PostgreSQL full-text search
 // (falling back to ILIKE for queries too short to tokenize meaningfully),
 // and ranked/sorted per a whitelisted sort mode. Rating is aggregated via a
 // LATERAL join so this stays a single query regardless of page size (no
 // N+1 per course).
-//
-// Queries of 3+ characters use websearch_to_tsquery against the GIN-indexed
-// search_vector column (title weighted above description). Queries of 1-2
-// characters fall back to a plain ILIKE on title: very short input rarely
-// tokenizes into a usable tsquery, and the demo catalog is small enough
-// that the resulting sequential scan is inconsequential. At real-world
-// scale this fallback should become a pg_trgm trigram index instead.
 func (r *Repository) SearchCourses(ctx context.Context, params ListCoursesParams) ([]Course, int, error) {
-	var tsQuery *string
-	ilikeQuery := ""
-	if q := params.Query; q != "" {
-		if len([]rune(q)) >= 3 {
-			tsQuery = &q
-		} else {
-			ilikeQuery = q
-		}
-	}
+	tsQuery, ilikeQuery := splitSearchQuery(params.Query)
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+courseColumns+`,
@@ -159,6 +164,51 @@ func (r *Repository) SearchCourses(ctx context.Context, params ListCoursesParams
 		result = append(result, c)
 	}
 	return result, total, rows.Err()
+}
+
+// SuggestCourses backs search-as-you-type (Stage 22A1): the same
+// published-only, tsquery/ILIKE-fallback matching and ts_rank ordering
+// SearchCourses uses (via the shared splitSearchQuery), but against the
+// narrow CourseSuggestion shape — no LATERAL rating join, no
+// COUNT(*) OVER() total — and hard-capped by limit rather than paginated,
+// since a per-keystroke query has nothing to page through. Query
+// normalization/bounding (trimming, empty checks, the limit value itself)
+// is the service's job, matching SearchCourses' own service/repository
+// split.
+func (r *Repository) SuggestCourses(ctx context.Context, query string, limit int) ([]CourseSuggestion, error) {
+	tsQuery, ilikeQuery := splitSearchQuery(query)
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT courses.id, courses.title, courses.slug, cat.name
+		FROM courses
+		LEFT JOIN categories cat ON cat.id = courses.category_id
+		WHERE courses.published = true
+			AND (
+				($1::text IS NOT NULL AND courses.search_vector @@ websearch_to_tsquery('russian', $1))
+				OR ($1::text IS NULL AND $2 <> '' AND courses.title ILIKE '%' || $2 || '%')
+			)
+		ORDER BY
+			CASE WHEN $1::text IS NOT NULL
+				THEN ts_rank(courses.search_vector, websearch_to_tsquery('russian', $1))
+				ELSE 0
+			END DESC,
+			courses.title ASC
+		LIMIT $3
+	`, tsQuery, ilikeQuery, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []CourseSuggestion{}
+	for rows.Next() {
+		var s CourseSuggestion
+		if err := rows.Scan(&s.ID, &s.Title, &s.Slug, &s.CategoryName); err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, rows.Err()
 }
 
 // ListAllAdmin returns every course regardless of published status, paged

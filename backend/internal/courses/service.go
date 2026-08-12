@@ -66,6 +66,35 @@ func (s *Service) SearchCourses(ctx context.Context, params ListCoursesParams) (
 	return pagination.New(items, params.Page, params.Limit, total), nil
 }
 
+// suggestionLimit is fixed, not caller-controlled — a suggestion dropdown
+// has no pagination UI, so there is no legitimate reason for a client to
+// ask for more than this (roadmap's own "top 5-8" target).
+const suggestionLimit = 8
+
+// suggestionQueryMaxRunes bounds input length before it ever reaches SQL.
+// A per-keystroke endpoint has no natural request-size limit otherwise,
+// and nothing meaningful can be suggested from a query this long anyway.
+const suggestionQueryMaxRunes = 100
+
+// SuggestCourses backs search-as-you-type: unlike SearchCourses, an empty
+// or whitespace-only query deliberately returns zero suggestions rather
+// than "browse everything" — a dropdown with no typed input yet has
+// nothing useful to suggest, whereas SearchCourses' empty-query browse
+// behavior exists for the full catalog page. Overlong input is truncated
+// to suggestionQueryMaxRunes before reaching the repository, so a
+// pathological client can't force an expensive query via a huge string.
+func (s *Service) SuggestCourses(ctx context.Context, query string) ([]CourseSuggestion, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []CourseSuggestion{}, nil
+	}
+	if runes := []rune(query); len(runes) > suggestionQueryMaxRunes {
+		query = string(runes[:suggestionQueryMaxRunes])
+	}
+
+	return s.repo.SuggestCourses(ctx, query, suggestionLimit)
+}
+
 func (s *Service) GetCourseDetail(ctx context.Context, id uuid.UUID) (*CourseDetail, error) {
 	course, err := s.repo.GetCourse(ctx, id)
 	if err != nil {
