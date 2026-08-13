@@ -291,23 +291,196 @@ Every image gets two tags per publish: `sha-<7-char-commit-sha>` (immutable, the
 - **No application behavior redesign** — per instruction 11; every change is Dockerfile/CI configuration only.
 - **28A3 not started** — no `deploy.yml`, no `docker-compose.prod.yml`, no actual image push to GHCR has happened.
 
+### Post-session update — live GitHub Actions run confirmed (2026-08-13)
+
+After this session ended, the design's own recommendation was followed exactly: `PROD_NEXT_PUBLIC_API_URL` was added under **Variables** (an earlier attempt added it under **Secrets** first — corrected once the `vars.*`/`secrets.*` distinction was pointed out, matching this doc's own "non-sensitive values belong in `vars`" design decision above). `image-publish.yml` was then re-run for real on GitHub's infrastructure (run `#1`, commit `42aa7cf`, triggered via `workflow_run` off `CI Quality Gate`):
+
+- `verify-inputs` — **passed** (2s).
+- `publish` matrix — **all 5 jobs completed successfully** (`backend`, `frontend`, `video-worker`, `notification-worker`, `code-runner`), 5 artifacts produced, total run duration 1m37s.
+
+This closes the "not yet proven against a real GitHub Actions run" limitation below — the workflow now has one real, successful, observed run, not just local validation.
+
 ### Known limitations
 
-- **`PROD_NEXT_PUBLIC_API_URL` is not yet configured** as a GitHub Actions repository/environment variable — until it is, `image-publish.yml`'s `verify-inputs` job will fail closed by design, and no image (not even the other four, since `publish` needs `verify-inputs`) will be built. This is the intended behavior (fail closed on a missing required input), not a bug, but it does mean the workflow cannot succeed yet as configured — flagged here so it isn't mistaken for something broken.
-- **Not yet proven against a real GitHub Actions run or a real GHCR push** — everything above was validated locally: YAML parsing, `actionlint`, `act -l`'s dependency-graph resolution, and full local builds/runs of all 5 images (including a live, DB-backed backend health check). None of this is the same as watching the workflow actually authenticate to `ghcr.io` and push a real manifest.
+- ~~`PROD_NEXT_PUBLIC_API_URL` is not yet configured~~ — **resolved**, see the post-session update above.
+- ~~Not yet proven against a real GitHub Actions run or a real GHCR push~~ — **resolved**, see the post-session update above. (Local validation — YAML parsing, `actionlint`, `act -l`, full local builds/runs of all 5 images including a live DB-backed backend health check — is still what this session itself performed; the live run came after, confirming it.)
 - **`code-runner` remains the one image that runs as root** — by design, not an oversight; a future session could revisit whether an alternative sandboxing mechanism (e.g., gVisor, a different namespace-creation approach) could avoid needing `CAP_SYS_ADMIN` as root, but that's a Stage-16-level sandboxing redesign, well outside this session's Dockerfile-hardening scope.
 - **Next.js `output: "standalone"` not adopted** — would shrink the frontend image further than the `prod-deps` split achieved, but touches `next.config.ts` and the Dockerfile's runtime entrypoint; left as a future option, not implemented, per instruction 11's "do not redesign application behavior."
 - **No Dockerfile-level `HEALTHCHECK` or Compose-level `healthcheck:` added for `backend`/`frontend`** — still an open item from 28A1, deliberately not addressed here either (it's an orchestration concern for the deploy-workflow sub-session, not an image-build one).
-- **GHCR package visibility (private vs. public) is not yet set** — nothing has been pushed yet, so there's nothing to configure; 28A1's recommendation (keep private, VPS does one `docker login`) still stands as the plan for 28A3.
-- **The registry-owner path (`ghcr.io/almukhanbetov/...`) assumes `github.repository_owner`** resolves to the expected account — correct for this repo's current `origin` remote, not re-verified against any GitHub Environment/org configuration since none exists yet.
+- **GHCR package visibility (private vs. public) not yet reviewed** — 5 packages now exist under the account's Packages tab from the run above; 28A1's recommendation (keep private, VPS does one `docker login`) still stands as the plan for 28A3, but the actual visibility setting on the now-real packages hasn't been explicitly checked.
+- **The registry-owner path (`ghcr.io/almukhanbetov/...`) assumes `github.repository_owner`** resolves to the expected account — confirmed correct by the live run above.
+
+## Stage 28A3 — production VPS deployment workflow (this session)
+
+Scope: prepare (design + build, not run) the actual VPS deploy workflow using the already-published GHCR images from 28A2. No Nginx/HTTPS, no full rollback stage, no real VPS contact — this session's deploy.yml has never been executed against a real server.
+
+### Inspection performed
+
+Read this file in full (28A1/28A2 sections plus the post-session update recording `image-publish.yml`'s first successful live run). Inspected `git status` (clean besides the earlier uncommitted `STAGE28_PROGRESS.md` post-session-update edit). Re-read `.github/workflows/image-publish.yml` fresh — confirmed the exact tag format it produces (`sha-<7char>` + `latest`), its `permissions: contents: read, packages: write`, and that it triggers via `workflow_run` off `CI Quality Gate` — this session's `deploy.yml` chains off *that* workflow's completion instead (not off `quality-gate` directly), since deploy needs the images to actually exist in GHCR first, not just the gate to have passed. Re-read `docker-compose.yml` in full again to get the exact current service graph, `depends_on` conditions, and healthcheck definitions right before writing an override against it. Did not inspect any application domain code, per instruction.
+
+### Design decisions
+
+**Production deploy directory: `/opt/lms`** — hardcoded as a job-level `env:` in `deploy.yml` rather than a configurable GitHub variable. It's a fixed, non-sensitive, rarely-changing value; adding a variable for it would be one more prerequisite to configure before anything works, for no real flexibility benefit. Holds only `docker-compose.yml`, `docker-compose.prod.yml`, `backend/migrations/`, and a real `.env` (populated once, manually, per 28A1's already-decided provisioning approach) — never application source.
+
+**Production docker compose file: `docker-compose.prod.yml`** (new, repo root) — an override, always invoked together with the base file (`docker compose -f docker-compose.yml -f docker-compose.prod.yml <cmd>`), exactly as 28A1 designed. Concretely:
+- Every buildable service (`backend`, `frontend`, `video-worker`, `notification-worker`, `code-runner`) gets `build: !reset null` + `image: ${IMAGE_REGISTRY}/course-<service>:${IMAGE_TAG}`. **`!reset` is load-bearing here, not decorative** — leaving both `build:` and `image:` present after a plain merge is ambiguous about whether `docker compose up` should ever attempt a local build; `!reset null` removes the base file's `build:` key entirely, verified below.
+- `postgres`/`minio` get `ports: !reset []` — dropped from the host entirely, not just rebound to localhost, since nothing on the VPS host itself needs to reach them directly either; only other containers do, via service name, unchanged from dev.
+- **`mailpit` is deliberately never named anywhere in this override or in `deploy.yml`'s `up -d` service list.** It stays defined in the base file (dev is unaffected) but is simply never one of the services `docker compose up -d` is told to start in production — the simplest, most explicit way to exclude a service without touching the base file or relying on Compose profiles.
+- **`notification-worker`'s `depends_on` is overridden with `!override`, not left to merge.** Compose deep-merges maps by default — a plain (unmarked) `depends_on: {migrate: ...}` override does **not** replace the base file's `depends_on: {mailpit: ..., migrate: ...}`, it merges into it, leaving `mailpit: condition: service_healthy` still present and still blocking startup on a service that's never started. Caught this by actually resolving the merged config (see Verification) rather than assuming the override worked — `!override` was needed specifically to replace the whole map instead of merging it.
+- `NEXT_PUBLIC_API_URL` needs no override here — it's already baked into the frontend image at build time by `image-publish.yml`'s own build-arg (Next.js inlines `NEXT_PUBLIC_*` into the client bundle at build time). The base file's runtime `environment: NEXT_PUBLIC_API_URL` passthrough is inherited unchanged and still matters for any server-rendered/server-component code that reads `process.env` live, distinct from what's already baked into the client bundle — both should carry the same real production URL, so this isn't a conflict, just worth naming.
+
+**Image names and exact SHA tag usage** — unchanged from 28A2's design, reused directly: `ghcr.io/almukhanbetov/course-{backend,frontend,video-worker,notification-worker,code-runner}:sha-<7char>`. `deploy.yml` resolves which tag to deploy in one step (`Resolve image tag to deploy`): either an explicit `workflow_dispatch` input (`image_tag`), or — for the automatic path — the first 7 characters of the commit SHA that `image-publish.yml` just built, taken from `github.event.workflow_run.head_sha`. **`latest` is never referenced anywhere in `deploy.yml`** — satisfies instruction 5 directly; every pull is pinned to an explicit, immutable `sha-*` tag written into the VPS's own `.env`.
+
+**Trigger design:** `workflow_run` off `Publish Production Images` completing on `main` (not off `CI Quality Gate` directly — chaining `quality-gate → image-publish → deploy` in sequence, each stage only starting once the previous one's actual artifact exists, not just its check passing) **plus** `workflow_dispatch` with an optional `image_tag` input. The manual path is deliberately also the rollback path: re-dispatching with an older, already-published `sha-*` tag runs the exact same pull → migrate → restart → health-check sequence against that older image — nothing rollback-specific needs to exist separately, per instruction 10's "rollback-safe structure, but do not implement the full rollback stage yet." (Migrations are forward-only and idempotent via goose's own tracking table, so re-running the migrate step during a "rollback" dispatch is always safe — it just finds nothing new to apply.)
+
+**No `environment: production` job key.** 28A1's original design recommended a dedicated GitHub Environment (for required-reviewer approval gates). This session didn't add it: every secret/variable observed being configured so far (`PROD_NEXT_PUBLIC_API_URL`, both the corrected Variable and the earlier mistaken Secret) has been added at the plain **repository** level, not environment-scoped — matching that actual, observed practice rather than silently introducing an approval-gate requirement the user hasn't set up. Noted below as a future hardening option, not applied now.
+
+**GHCR authentication on the VPS (instruction 8):** re-authenticates fresh on every single deploy using that run's own ephemeral `GITHUB_TOKEN` (declared `packages: read` at the workflow level), piped over SSH via stdin straight into `docker login --password-stdin` — never as a literal command-line argument on either end (avoids it ever appearing in a `ps aux` listing). This is a refinement of 28A1's original assumption of "the VPS does one persistent `docker login`" — no separate long-lived PAT needs to be created or stored on the VPS at all; whatever credential lands in the VPS's Docker config expires with that run's token shortly after, rather than sitting there indefinitely.
+
+**Host-key trust: TOFU (trust-on-first-use), not pinned.** Instruction 7's required-secrets list is exactly `PROD_VPS_HOST`/`PROD_VPS_USER`/`PROD_VPS_SSH_PORT`/`PROD_VPS_SSH_PRIVATE_KEY` — no pinned-known-hosts secret. `deploy.yml` runs `ssh-keyscan` against the VPS at the start of every deploy and accepts whatever key is presented. This is weaker than 28A1's original design (which included a `DEPLOY_SSH_KNOWN_HOSTS` secret) but matches the exact secret list this session was given — flagged explicitly below as a real, not cosmetic, security trade-off, with the concrete fix (`PROD_VPS_KNOWN_HOSTS`, pinned once and never scanned again) recorded for later.
+
+**Failure conditions (instruction 9), mapped to concrete steps, not left implicit:**
+
+| Required failure condition | `deploy.yml` step that enforces it |
+|---|---|
+| SSH failure | `Verify SSH connectivity` — dedicated step, fails fast with a clear name before any file transfer or remote command is attempted |
+| GHCR login/pull failure | `Log in to GHCR on the VPS` and `Set IMAGE_TAG and pull images` are separate steps — a failed login never gets to attempt a pull, and a failed pull never gets to touch running containers |
+| Migration failure | `Run migrations` — `--exit-code-from migrate migrate`, the same exit-code-gated pattern already proven in Stage 27A3; a non-zero exit stops the job before `Restart services` ever runs |
+| Backend health failure | `Backend health check` — bounded `curl -sf` retry loop (30 attempts × 2s) against `http://localhost:$BACKEND_PORT/api/v1/health` **run on the VPS itself** (not from the GitHub runner over the public internet — no reverse proxy exists yet, pre-28A4, so there's no assumption about public reachability baked into this check) |
+| Frontend startup failure | `Frontend availability check` — identical retry-loop shape against `http://localhost:$FRONTEND_PORT/`, also VPS-local |
+
+Every one of these is its own named workflow step specifically so a failure surfaces as a distinct, identifiable red step in the Actions UI, not a single opaque "deploy" blob — directly serving instruction 9's requirement that each of these is a real, distinguishable failure mode, not just a mentioned concept.
+
+### Change made
+
+- `docker-compose.prod.yml` (new) — production override, as designed above.
+- `.github/workflows/deploy.yml` (new) — the deploy workflow, as designed above.
+
+No changes to `docker-compose.yml`, no Dockerfile changes, no Nginx config, no application code. `.env.production.example` already anticipated everything this session needed (`IMAGE_TAG`, `IMAGE_REGISTRY`, `BACKEND_PORT`, `FRONTEND_PORT` were all already present from 28A1) — nothing to add there.
+
+### Files changed
+
+- `docker-compose.prod.yml` — new.
+- `.github/workflows/deploy.yml` — new.
+- `STAGE28_PROGRESS.md` — this section added.
+
+### Required GitHub Secrets (this session's exact scope, instruction 7)
+
+| Secret | Purpose |
+|---|---|
+| `PROD_VPS_HOST` | VPS address |
+| `PROD_VPS_USER` | Deploy user on the VPS |
+| `PROD_VPS_SSH_PORT` | SSH port |
+| `PROD_VPS_SSH_PRIVATE_KEY` | Private key for that user |
+
+No new secret for GHCR access (reuses the job's own `GITHUB_TOKEN`, see Design decisions). The broader secret list from 28A1 (`PROD_POSTGRES_*`, `PROD_JWT_SECRET`, `PROD_MINIO_*`, `PROD_SMTP_*`, `PROD_PAYMENT_PROVIDER`) is **not** read by `deploy.yml` at all — per 28A1's own "set once, manually, directly on the VPS" decision, those live only in the VPS's own `.env`, populated outside of any GitHub Actions run; `deploy.yml` only ever updates that file's `IMAGE_TAG` line.
+
+### Migration command/order
+
+`docker compose -f docker-compose.yml -f docker-compose.prod.yml up --exit-code-from migrate migrate`, run **after** images are pulled and **before** `Restart services`. Reuses `migrate`'s existing base-file definition completely unchanged (bind-mounts `./backend/migrations:/migrations:ro`, `depends_on: postgres: condition: service_healthy`) — the deploy workflow's `Sync compose files and migrations to the VPS` step is what makes that relative bind-mount path resolve correctly on the VPS (see Verification: the exact directory structure was tested, not assumed).
+
+### Service restart order
+
+`docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d postgres minio minio-init backend frontend video-worker notification-worker code-runner` — one command, explicit service list (mailpit excluded). Actual startup ordering among these is unchanged from `docker-compose.yml`'s own existing `depends_on` graph: `migrate` (already run and gated in the previous step) → `backend`/`video-worker`/`code-runner` (all depend only on `migrate` + `minio-init`) → `frontend` (depends on `backend`). Nothing about this ordering was redesigned; the deploy workflow just triggers the same graph the dev stack has always used.
+
+### Backend health check / frontend availability check
+
+Both run **on the VPS itself** via SSH, not from the GitHub Actions runner over the public internet — deliberate, since no reverse proxy exists yet (28A4) and this session makes no assumption about what's publicly reachable. `curl -sf http://localhost:$BACKEND_PORT/api/v1/health` and `curl -sf http://localhost:$FRONTEND_PORT/`, each in a 30-attempt/2-second-interval retry loop, reading `$BACKEND_PORT`/`$FRONTEND_PORT` from the VPS's own `.env` (sourced fresh in every remote command) rather than hardcoding a port number.
+
+### Rollback-safe structure (not the full rollback stage — instruction 10)
+
+`deploy.yml`'s `workflow_dispatch` input (`image_tag`) is the rollback mechanism: dispatching manually with a prior `sha-*` tag runs the identical pull → migrate → restart → health-check sequence against that older, already-published image — no separate rollback job, workflow, or script exists or is needed for this to work, because nothing in the deploy sequence is forward-only except the migrations themselves, which are safe to re-run (goose only applies what's new; re-running against an unchanged or already-forward schema is a no-op). What's genuinely **not** built yet: a dedicated, friendlier rollback UX (e.g., a workflow input that says "roll back to the previous deploy" without the operator needing to know/paste the exact prior SHA themselves), and this has never been exercised against a real VPS.
+
+### Validation performed
+
+**YAML/actionlint (instruction 11):**
+- `python3 -c "yaml.safe_load(...)"` on `deploy.yml` — parses cleanly; confirmed both `workflow_run` (off `Publish Production Images`) and `workflow_dispatch` triggers present, `deploy` job present.
+- `actionlint` across all six workflow files together (re-installed fresh into `/tmp/gobin`, same as every prior session — the binary doesn't survive between sessions since it lives in ephemeral `/tmp`) — **zero findings**.
+- `act -l -W .github/workflows/deploy.yml` — resolved correctly: one job (`deploy`), triggered by either `workflow_run` or `workflow_dispatch`, exactly as designed.
+
+**`docker compose config` (instruction 11) — actually resolved, not assumed:**
+- First pass caught a real bug: `notification-worker`'s `depends_on` override, written as a plain (unmarked) map, did **not** drop the base file's `mailpit: condition: service_healthy` entry as intended — Compose deep-merges maps by default. Confirmed by inspecting the actual resolved YAML (`docker compose -f docker-compose.yml -f docker-compose.prod.yml config`, parsed with `yaml.safe_load` and checked field-by-field), not by reading the source file and assuming it worked.
+- Fixed with `depends_on: !override { migrate: ... }`, which replaces the whole map instead of merging into it. Re-resolved and reconfirmed: `notification-worker`'s merged `depends_on` now contains only `migrate`, `mailpit` is gone.
+- Also confirmed, on the same resolved output: `build:` is absent (not just overridden-alongside-`image:`) for all five buildable services, each carrying the correct `ghcr.io/almukhanbetov/course-<service>:sha-<tag>` image reference; `postgres`/`minio` have no `ports:` entry at all in the merged config.
+- Test env values used throughout were placeholders in the same style as every prior session's isolated testing (`prodtest`/`prod-test-placeholder-not-real`/etc.) — never real credentials.
+
+**Deploy-directory path structure — tested, not assumed:** simulated the exact `rsync` invocations `deploy.yml` uses (`rsync backend/migrations` into a `backend/` subdirectory at the target, rather than flattening it) against a local throwaway directory standing in for the VPS. Confirmed the result is `$DEPLOY_DIR/backend/migrations/*.sql` (all 40 files present) — the exact relative path `docker-compose.yml`'s existing `./backend/migrations:/migrations:ro` bind mount expects, requiring zero changes to that file.
+
+**Embedded bash logic — simulated directly**, since there is no real VPS to exercise these steps against end-to-end this session:
+- Tag-resolution logic: no manual input → correctly derives `sha-<7char>` from the triggering commit; manual `workflow_dispatch` input provided → correctly uses that value instead (the rollback path).
+- Missing-secrets check: all four present → passes; any one missing → fails with the specific missing name(s) listed.
+- Health-check retry loop: mocked a `curl` that fails twice then succeeds → loop correctly detects success on the 3rd attempt; mocked a `curl` that always fails → loop correctly exhausts its attempts and exits 1 (not a silent success).
+
+**Not done this session, and explicitly cannot be done without a real VPS:** an actual SSH connection, an actual GHCR pull on a remote host, an actual migration run against a production-shaped database, an actual backend/frontend container start under this workflow, or a real end-to-end deploy. Every check above validates the workflow's *logic* and the compose file's *resolved configuration* — none of it is the same as watching `deploy.yml` actually deploy something.
+
+### Known limitations
+
+- **Host-key trust is TOFU, not pinned** — `deploy.yml` accepts whatever host key the VPS presents on each run (`ssh-keyscan`), rather than verifying against a pre-recorded fingerprint. This is a real weakening relative to 28A1's original design (which included a pinned `DEPLOY_SSH_KNOWN_HOSTS` secret) — a consequence of this session's exact required-secrets list (instruction 7) not including one. Fix, if wanted later: add a `PROD_VPS_KNOWN_HOSTS` secret (the output of `ssh-keyscan` run once, by hand, and saved) and replace the `ssh-keyscan` step with writing that value directly to `~/.ssh/known_hosts`.
+- **No dedicated GitHub Environment / required-reviewer approval gate** — `deploy.yml` runs unattended the moment its triggers fire; nothing pauses for a human "approve this deploy" click. 28A1 recommended this; not added, per the "matches observed repo-level secret practice" reasoning above. A future hardening step, not a current bug.
+- **Never run against a real VPS** — by explicit instruction, and because none has been provisioned yet. Every validation this session performed is local: YAML/actionlint, `docker compose config` resolution (with a real, caught, fixed bug), local rsync path simulation, and direct bash-logic simulation of each script block. This is meaningfully more verification than "read the file and assume it's right," but it is still not the same as a real deploy.
+- **VPS prerequisites (Docker installed, deploy user in the `docker` group, `/opt/lms` created, an initial `.env` populated by hand from `.env.production.example`, firewall rules) are still exactly what 28A1 documented** — none of them have been set up, since no VPS exists yet. `deploy.yml` will fail immediately and clearly at `Verify SSH connectivity` if pointed at a host that isn't ready, rather than partially succeeding.
+- **The SMTP-provider gap from 28A1 is unchanged** — `docker-compose.prod.yml` correctly stops trying to depend on Mailpit in production, but no real provider has been chosen, so `notification-worker` will start successfully yet be unable to actually send email until that decision is made and `SMTP_*` in the VPS's `.env` points somewhere real.
+- **The payment-provider gap from 28A1 is unchanged** — still `mock`-only in code.
+- **Rollback is structurally supported (manual re-dispatch with an older tag) but has no dedicated UX and has never been exercised for real.**
+
+## Stage 28A3 safety fix — fail-closed production config validation (this session)
+
+Scope: one pre-deploy safety fix only, prompted by two read-only pre-deploy checks in prior sessions — the general safety review (which surfaced that `deploy.yml` never validated the VPS's own `.env` before touching anything) and the SMTP-specific check (which confirmed empty `SMTP_HOST` is a safe, intentional state, not a misconfiguration to reject). No deploy, no push, no new files besides this section.
+
+### Inspection performed
+
+Read `.github/workflows/deploy.yml`, `.env.production.example`, `docker-compose.yml`, `docker-compose.prod.yml`, and this file fresh, per instruction. Confirmed the exact placeholder string this fix needs to reject verbatim: `.env.production.example:26` — `JWT_SECRET=__SET_VIA_GITHUB_SECRET_PROD_JWT_SECRET__`. Confirmed `cmd/notification-worker/main.go:31-33` and `internal/notifications/email.go`'s `LogSender` (already read in the prior SMTP-specific check this session continues from) — empty `SMTP_HOST` deterministically falls back to a no-op sender that never fails, so it must **not** be part of this validation, per instruction 3.
+
+### Design decisions
+
+- **Runs on the VPS itself, over the existing SSH connection — not in the GitHub Actions runner.** None of the 8 values this check validates ever exist anywhere this workflow's runner can see them (per 28A1's "set once, manually, on the VPS" decision, reaffirmed by the pre-deploy safety report: `deploy.yml` never uploads or creates `.env`). The only place capable of checking them is the VPS's own shell, after sourcing its own `.env` — so this had to be a remote step, following the exact same `ssh ... "cd '$DEPLOY_DIR' && set -a && . ./.env && set +a && ..."` pattern already established by the health-check steps, for consistency.
+- **Placed immediately after `Sync compose files and migrations to the VPS`, before `Log in to GHCR on the VPS`.** As early as it can possibly run (needs `$DEPLOY_DIR` to exist, which the sync step just ensured) and strictly before anything that pulls an image, authenticates to a registry, runs a migration, or restarts a container — a bad config now fails before any of those, not after.
+- **Checks presence for `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`/`DATABASE_URL`/`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`, and two distinct conditions for `JWT_SECRET`** (empty, or exactly equal to `.env.production.example`'s literal placeholder string) — each failure reason collected into one array and reported together in a single message, rather than failing on the first problem found, so a first-time VPS setup with multiple unfilled placeholders gets one complete list instead of a fix-one-fail-again loop.
+- **`SMTP_HOST`/`SMTP_USER`/`SMTP_PASSWORD` deliberately excluded**, per instruction 3 and the prior SMTP-specific check's own finding: empty `SMTP_HOST` is a real, working, intentionally-designed production state (`LogSender`), not something to reject.
+- **An explicit `[ ! -f .env ]` check with a clear message, before attempting to source it** — `sed`/`source` against a missing file already fail (verified directly in the earlier safety-report session: `sed -i` on a nonexistent file exits 2), but a plain "No such file or directory" is a worse first-deploy debugging experience than a message that names the missing file and points at `.env.production.example`.
+- **The placeholder string is duplicated between `.env.production.example` and `deploy.yml`** — a real, acknowledged coupling. If that placeholder text is ever edited in one file, it must be updated in the other or this specific check silently stops catching it (every other check in this step is unaffected). Recorded here rather than solved with e.g. a shared constants file, since that would be new infrastructure for one string.
+
+### Change made
+
+`.github/workflows/deploy.yml` — one new step, `Validate critical production config on the VPS`, inserted between `Sync compose files and migrations to the VPS` and `Log in to GHCR on the VPS`. No other step changed.
+
+### Files changed
+
+- `.github/workflows/deploy.yml` — one new step added.
+- `STAGE28_PROGRESS.md` — this section added.
+
+No real production values were hardcoded anywhere (instruction 4) — the new step only ever reads values that already live in the VPS's own `.env`, never a literal secret in this repo. No `.env` is created or uploaded (instruction 5, unchanged from before this fix). `DEPLOY_DIR` remains `/opt/lms` (instruction 6, untouched).
+
+### Verification performed
+
+- `python3 -c "yaml.safe_load(...)"` — `deploy.yml` still parses cleanly; confirmed step order programmatically: `Sync compose files and migrations to the VPS` → `Validate critical production config on the VPS` → `Log in to GHCR on the VPS`, exactly as designed.
+- `actionlint` across all six workflow files — **zero findings**.
+- **The actual validation logic, extracted and run locally against real mock `.env` files** (not just read and trusted), covering four scenarios:
+
+  | Scenario | Result |
+  |---|---|
+  | Fully valid config, `SMTP_HOST` empty | **PASS** (exit 0) — confirms instruction 3's requirement holds |
+  | `POSTGRES_PASSWORD` empty, everything else valid | **FAIL** (exit 1), correctly names only `POSTGRES_PASSWORD` |
+  | `JWT_SECRET` set to the exact `.env.production.example` placeholder string | **FAIL** (exit 1), correctly flagged as `JWT_SECRET_still_the_example_placeholder` (distinct from the empty-string case) |
+  | Every required variable missing | **FAIL** (exit 1), all 7 problems listed together in one message (`JWT_SECRET_empty` fires, not the placeholder check too — no double-counting since an empty string isn't equal to the placeholder text) |
+
+- Separately confirmed the `.env`-missing-entirely case produces the intended clear message (`".env not found in /opt/lms - see .env.production.example"`) rather than a bare filesystem error.
+
+### Not done this session
+
+- **No deploy, no push** — per instructions 7/8; nothing has been run against a real VPS.
+- **No new GitHub secrets or variables** — this check only reads what's already on the VPS.
+- **No change to which values are considered optional beyond SMTP** — `PAYMENT_PROVIDER`, `S3_*`, and the various numeric-default config values are still unvalidated by this step, since instruction 2's list is the explicit, minimum scope for this fix, not a general config-linter.
+- **The placeholder-string duplication between the two files is not resolved**, only documented (see Design decisions).
 
 ## Remaining for Stage 28 (not started)
 
-28A2 (this session) covered both the Dockerfile-hardening work 28A1 anticipated as its own session and the GHCR build/publish workflow — done together since they turned out to be one coherent unit of work. What's left, per the roadmap's own recommended split:
+28A2 covered the Dockerfile-hardening work 28A1 anticipated as its own session together with the GHCR build/publish workflow (confirmed live, see the post-session update above). 28A3 (this session) built the actual VPS deploy workflow and production compose override — designed, built, and validated as thoroughly as possible without a real server, but never executed against one. What's left:
 
-- **Prerequisite for `image-publish.yml` to actually succeed:** configure `PROD_NEXT_PUBLIC_API_URL` as a GitHub Actions repository/environment variable — the workflow fails closed without it, by design (see 28A2's Known limitations).
-- **28A3 — deploy-workflow session:** `docker-compose.prod.yml`, `.github/workflows/deploy.yml` implementing the deployment-ordering sequence above, the SSH step, the exit-code-gated migration step, the health-check loop, and the `workflow_dispatch` rollback path — now able to reference `image-publish.yml`'s `sha-*` tags directly, since those are built and ready.
-- **28A4 — Nginx/HTTPS session:** reverse proxy in front of frontend/backend, Let's Encrypt/certbot, the firewall/port changes this design assumes.
-- **Post-deploy smoke test**, per the roadmap's own E2E requirement: health check, login, enroll, a payment-provider sandbox transaction, certificate verification — depends on 28A3 existing first, and on the payment-provider gap above being resolved for the payment-sandbox portion specifically.
-- **Rollback procedure, tested for real** — 28A1 designed it; 28A3 needs to build it; a later session needs to actually exercise it once a VPS exists.
-- **A real GitHub Actions run of `image-publish.yml`** — not yet fired, since it needs `PROD_NEXT_PUBLIC_API_URL` configured and a push to `main` after `quality-gate` passes.
+- **A VPS.** The single real blocker for everything below — nothing in `deploy.yml` can be proven end-to-end until one exists, is provisioned per 28A1/28A3's documented prerequisites (Docker installed, deploy user, `/opt/lms` created, an initial `.env` from `.env.production.example`, firewall rules), and its SSH details are added as the 4 secrets 28A3 requires.
+- **28A4 — Nginx/HTTPS session:** reverse proxy in front of frontend/backend, Let's Encrypt/certbot, the firewall/port changes this design assumes. Also the natural point to revisit whether the backend/frontend health checks should additionally be checked from outside the VPS (through the proxy), not just locally as 28A3 does today.
+- **A real GitHub Actions run of `deploy.yml`** — not yet fired; needs a VPS and its 4 secrets configured first.
+- **Post-deploy smoke test**, per the roadmap's own E2E requirement: health check, login, enroll, a payment-provider sandbox transaction, certificate verification — depends on a real deploy existing first, and on the payment-provider gap being resolved for the payment-sandbox portion specifically.
+- **Rollback procedure, tested for real** — 28A1 designed it, 28A3 built the structural mechanism (manual re-dispatch with an older tag), a later session needs to actually exercise it once a VPS and a real prior deploy both exist.
+- **Optional hardening, not blockers:** a pinned `PROD_VPS_KNOWN_HOSTS` secret (currently TOFU), a dedicated GitHub Environment with required-reviewer approval gates, a friendlier rollback UX that doesn't require pasting an exact SHA by hand.
+- **The SMTP-provider and payment-provider gaps** — unresolved since 28A1, independent of the deploy pipeline's own correctness.

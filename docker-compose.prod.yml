@@ -1,0 +1,74 @@
+# Production override — always used together with the base file, never
+# standalone:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml <cmd>
+#
+# Design decisions are recorded in STAGE28_PROGRESS.md's "Production compose
+# strategy" (28A1) and 28A3 sections — this file only overrides what
+# genuinely needs to differ from dev; the base file still owns the service
+# graph, depends_on conditions, and healthchecks for everything not touched
+# here.
+services:
+  # --- Buildable services: replace `build:` with a specific, immutable,
+  # already-published image tag. The VPS never builds anything, only pulls.
+  # `build: !reset null` removes the base file's `build:` key entirely
+  # (rather than leaving both `build:` and `image:` present after merging,
+  # which would be ambiguous about whether `docker compose up` should ever
+  # attempt a local build) — Compose's merge-reset tag, supported since
+  # Compose CLI v2.24.0.
+  backend:
+    build: !reset null
+    image: ${IMAGE_REGISTRY}/course-backend:${IMAGE_TAG}
+
+  frontend:
+    build: !reset null
+    image: ${IMAGE_REGISTRY}/course-frontend:${IMAGE_TAG}
+    # NEXT_PUBLIC_API_URL is already baked into this image at build time by
+    # image-publish.yml (see that workflow's build-args) — nothing to
+    # override here; the ARG only matters at image-build time, which never
+    # happens on the VPS.
+
+  video-worker:
+    build: !reset null
+    image: ${IMAGE_REGISTRY}/course-video-worker:${IMAGE_TAG}
+
+  notification-worker:
+    build: !reset null
+    image: ${IMAGE_REGISTRY}/course-notification-worker:${IMAGE_TAG}
+    # mailpit dropped from this service's dependency graph — mailpit is
+    # dev-only (docker-compose.yml's own comment: "nothing is ever actually
+    # delivered") and must never be started in production. A real SMTP
+    # provider has not been chosen yet (STAGE28_PROGRESS.md's known
+    # limitations) — SMTP_* stays whatever the VPS's own .env has been
+    # configured with once that decision is made; this override only
+    # removes the hard dependency on the dev-only mail catcher.
+    # `!override` replaces the whole depends_on map rather than merging into
+    # it — plain (unmarked) merging would deep-merge maps key-by-key and
+    # leave the base file's `mailpit: condition: service_healthy` entry
+    # sitting alongside this one, defeating the point of dropping it.
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+
+  code-runner:
+    build: !reset null
+    image: ${IMAGE_REGISTRY}/course-code-runner:${IMAGE_TAG}
+
+  # --- Postgres/MinIO must never be reachable from outside the VPS in
+  # production — only other containers on the compose network need them,
+  # via their service name, exactly as in dev. `!reset []` removes the base
+  # file's host port mappings entirely (not just rebinding to localhost,
+  # since nothing on the VPS host itself needs to reach them directly
+  # either). Nginx (Stage 28A4, not yet configured) is the only service
+  # that should ever bind a public port.
+  postgres:
+    ports: !reset []
+
+  minio:
+    ports: !reset []
+
+  # mailpit is intentionally left completely undeclared here — it stays
+  # defined in the base file (so dev is unaffected) but is never named in
+  # this override or in the deploy workflow's `up -d` service list, so
+  # `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`
+  # never starts it in production. See notification-worker's override above
+  # for why nothing depends on it anymore either.

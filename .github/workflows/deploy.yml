@@ -1,0 +1,195 @@
+name: Deploy to Production
+
+# Triggers automatically once new images exist for main (after "Publish
+# Production Images" succeeds), and can also be run manually. A manual
+# workflow_dispatch with an older `image_tag` reuses this exact same
+# pull -> migrate -> restart -> health-check sequence against a prior,
+# already-published sha-* image — that IS this workflow's rollback path;
+# see STAGE28_PROGRESS.md's "Rollback-safe structure" for why a separate
+# rollback-specific job isn't needed yet.
+"on":
+  workflow_run:
+    workflows: ["Publish Production Images"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Immutable sha-<7char> tag to deploy (e.g. sha-42aa7cf). Leave empty to deploy the commit that triggered this run."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      # Production deploy directory on the VPS — holds only
+      # docker-compose.yml, docker-compose.prod.yml, backend/migrations/,
+      # and a real .env populated once, manually, on first VPS setup (see
+      # .env.production.example). Never holds application source.
+      DEPLOY_DIR: /opt/lms
+      SSH_HOST: ${{ secrets.PROD_VPS_HOST }}
+      SSH_USER: ${{ secrets.PROD_VPS_USER }}
+      SSH_PORT: ${{ secrets.PROD_VPS_SSH_PORT }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Resolve image tag to deploy
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            TAG="${{ inputs.image_tag }}"
+          else
+            SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+            TAG="sha-${SHA:0:7}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Deploying image tag: $TAG"
+
+      # Fails closed before any SSH/network activity — matches
+      # STAGE28_PROGRESS.md's established "fail closed if a required
+      # value is missing" philosophy (28A1/28A2), extended here to the
+      # SSH connection secrets this workflow needs.
+      - name: Verify required secrets are present
+        run: |
+          missing=()
+          [ -z "$SSH_HOST" ] && missing+=(PROD_VPS_HOST)
+          [ -z "$SSH_USER" ] && missing+=(PROD_VPS_USER)
+          [ -z "$SSH_PORT" ] && missing+=(PROD_VPS_SSH_PORT)
+          [ -z "${{ secrets.PROD_VPS_SSH_PRIVATE_KEY }}" ] && missing+=(PROD_VPS_SSH_PRIVATE_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+          echo "Required secrets present."
+
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.PROD_VPS_SSH_PRIVATE_KEY }}
+
+      # Trust-on-first-use: this workflow's required-secrets list
+      # (instruction) does not include a pinned known_hosts value, so the
+      # VPS's host key is accepted on first contact each run rather than
+      # verified against a pre-recorded fingerprint. Weaker than pinning —
+      # see STAGE28_PROGRESS.md's known limitations for the trade-off and
+      # how to strengthen it later (a PROD_VPS_KNOWN_HOSTS secret).
+      - name: Trust the VPS host key (TOFU)
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Verify SSH connectivity
+        run: ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "echo connected"
+
+      - name: Sync compose files and migrations to the VPS
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_DIR/backend'"
+          rsync -az -e "ssh -p $SSH_PORT" \
+            docker-compose.yml docker-compose.prod.yml \
+            "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/"
+          rsync -az -e "ssh -p $SSH_PORT" \
+            backend/migrations \
+            "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/backend/"
+
+      # Reads the VPS's own .env (never uploaded or created by this
+      # workflow — see the "Sync" step above, .env is deliberately not one
+      # of the files transferred) and fails closed before anything below
+      # pulls an image, runs a migration, or restarts a container. This
+      # workflow has no access to these values itself — they exist only on
+      # the VPS — so this check can only run there, over the same SSH
+      # connection, not locally in the runner.
+      #
+      # SMTP_* is deliberately NOT checked here: notification-worker falls
+      # back to a safe no-op LogSender whenever SMTP_HOST is empty (see
+      # cmd/notification-worker/main.go and STAGE28_PROGRESS.md's SMTP
+      # pre-deploy check) — an empty SMTP config is a valid, working
+      # production state, not a misconfiguration.
+      - name: Validate critical production config on the VPS
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_DIR' && \
+             if [ ! -f .env ]; then echo '.env not found in $DEPLOY_DIR - see .env.production.example'; exit 1; fi && \
+             set -a && . ./.env && set +a && \
+             missing=(); \
+             [ -z \"\$POSTGRES_USER\" ] && missing+=(POSTGRES_USER); \
+             [ -z \"\$POSTGRES_PASSWORD\" ] && missing+=(POSTGRES_PASSWORD); \
+             [ -z \"\$POSTGRES_DB\" ] && missing+=(POSTGRES_DB); \
+             [ -z \"\$DATABASE_URL\" ] && missing+=(DATABASE_URL); \
+             [ -z \"\$JWT_SECRET\" ] && missing+=(JWT_SECRET_empty); \
+             [ \"\$JWT_SECRET\" = '__SET_VIA_GITHUB_SECRET_PROD_JWT_SECRET__' ] && missing+=(JWT_SECRET_still_the_example_placeholder); \
+             [ -z \"\$MINIO_ROOT_USER\" ] && missing+=(MINIO_ROOT_USER); \
+             [ -z \"\$MINIO_ROOT_PASSWORD\" ] && missing+=(MINIO_ROOT_PASSWORD); \
+             if [ \${#missing[@]} -gt 0 ]; then echo \"Invalid production config in $DEPLOY_DIR/.env: \${missing[*]}\"; exit 1; fi; \
+             echo 'Production config validated.'"
+
+      # Uses this job's own ephemeral GITHUB_TOKEN (packages: read, scoped
+      # to this run only) rather than a separate long-lived PAT stored on
+      # the VPS — one fewer secret to manage, and nothing persisted there
+      # outlives this token's own short lifetime. Piped via stdin (both to
+      # ssh and then to `docker login --password-stdin`) so the token is
+      # never a literal argument in any process's command line.
+      - name: Log in to GHCR on the VPS
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+
+      - name: Set IMAGE_TAG and pull images
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_DIR' && \
+             sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=${{ steps.tag.outputs.tag }}/' .env && \
+             set -a && . ./.env && set +a && \
+             docker compose -f docker-compose.yml -f docker-compose.prod.yml pull"
+
+      # Exit-code gated, exactly the pattern proven in Stage 27A3's
+      # infra-ci.yml — must reach exit 0 before anything below touches
+      # backend/frontend, so a bad migration never leaves the currently
+      # running (old) containers disturbed.
+      - name: Run migrations
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_DIR' && set -a && . ./.env && set +a && \
+             docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+               up --exit-code-from migrate migrate"
+
+      # Named explicitly, not a bare 'up -d' — mailpit stays defined in the
+      # base compose file (for dev) but must never start in production; see
+      # docker-compose.prod.yml's own comment on this. Ordering among these
+      # (migrate -> backend/video-worker/code-runner -> frontend) is already
+      # encoded in docker-compose.yml's own depends_on graph, unchanged.
+      - name: Restart services
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_DIR' && set -a && . ./.env && set +a && \
+             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d \
+               postgres minio minio-init backend frontend video-worker notification-worker code-runner"
+
+      - name: Backend health check
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_DIR' && set -a && . ./.env && set +a && \
+             for i in \$(seq 1 30); do \
+               curl -sf \"http://localhost:\${BACKEND_PORT}/api/v1/health\" && exit 0; \
+               sleep 2; \
+             done; \
+             echo 'backend did not become healthy in time'; exit 1"
+
+      - name: Frontend availability check
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_DIR' && set -a && . ./.env && set +a && \
+             for i in \$(seq 1 30); do \
+               curl -sf \"http://localhost:\${FRONTEND_PORT}/\" >/dev/null && exit 0; \
+               sleep 2; \
+             done; \
+             echo 'frontend did not become available in time'; exit 1"
