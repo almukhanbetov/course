@@ -1,0 +1,44 @@
+name: CI Quality Gate
+
+"on":
+  push:
+  pull_request:
+
+jobs:
+  # Each of these calls the existing, unmodified check logic in its own
+  # workflow file (Stage 27A1/27A2/27A3) as a reusable workflow — see that
+  # file for what it actually checks. Nothing here re-implements or copies
+  # those steps; this is the single entry point that now triggers them.
+  backend:
+    uses: ./.github/workflows/backend-ci.yml
+
+  frontend:
+    uses: ./.github/workflows/frontend-ci.yml
+
+  infra:
+    uses: ./.github/workflows/infra-ci.yml
+
+  # The one required status check for branch protection. Runs unconditionally
+  # (if: always()) so it reports an explicit pass/fail rather than being
+  # silently skipped when a dependency fails — a skipped check is easy to
+  # misread as "not required" in a branch-protection UI, a failed one is not.
+  quality-gate:
+    name: Quality gate
+    needs: [backend, frontend, infra]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require backend, frontend, and infra CI to have passed
+        run: |
+          echo "backend:  ${{ needs.backend.result }}"
+          echo "frontend: ${{ needs.frontend.result }}"
+          echo "infra:    ${{ needs.infra.result }}"
+
+          if [ "${{ needs.backend.result }}" != "success" ] || \
+             [ "${{ needs.frontend.result }}" != "success" ] || \
+             [ "${{ needs.infra.result }}" != "success" ]; then
+            echo "One or more required Stage 27 CI checks did not succeed."
+            exit 1
+          fi
+
+          echo "All required Stage 27 CI checks passed."

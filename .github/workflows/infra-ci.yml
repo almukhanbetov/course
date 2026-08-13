@@ -1,0 +1,90 @@
+name: Infra CI
+
+"on":
+  workflow_call:
+
+jobs:
+  infra:
+    name: compose config / build / migrate / health
+    runs-on: ubuntu-latest
+
+    # CI-only, throwaway values — never the real .env. No GitHub secret is
+    # used or needed here: nothing this job touches is a real credential,
+    # and the whole stack is torn down (including its volumes) at the end
+    # of the job regardless of outcome.
+    env:
+      POSTGRES_USER: ci
+      POSTGRES_PASSWORD: ci_password
+      POSTGRES_DB: ci
+      POSTGRES_PORT: "5432"
+      BACKEND_PORT: "8080"
+      DATABASE_URL: postgres://ci:ci_password@postgres:5432/ci?sslmode=disable
+      JWT_SECRET: ci-only-test-secret-not-for-production
+      MINIO_ROOT_USER: ci-minio-admin
+      MINIO_ROOT_PASSWORD: ci-minio-secret
+      MINIO_API_PORT: "9000"
+      MINIO_CONSOLE_PORT: "9001"
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: ci-minio-admin
+      S3_SECRET_KEY: ci-minio-secret
+      S3_BUCKET: ci-bucket
+      S3_REGION: us-east-1
+      MAILPIT_SMTP_PORT: "1025"
+      MAILPIT_UI_PORT: "8025"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      SMTP_FROM_EMAIL: no-reply@ci.local
+      SMTP_FROM_NAME: CI
+      FRONTEND_PORT: "3001"
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      API_INTERNAL_URL: http://backend:8080
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker compose config
+        run: docker compose config
+
+      - name: Reset any stale state
+        run: docker compose down -v --remove-orphans
+
+      - name: Build backend image
+        run: docker compose build backend
+
+      - name: Start PostgreSQL and wait for healthy
+        run: docker compose up -d --wait postgres
+
+      - name: Run migrations against a fresh database
+        run: docker compose up --exit-code-from migrate migrate
+
+      - name: Start backend after migrations
+        run: docker compose up -d backend
+
+      - name: Wait for backend health endpoint
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "http://localhost:${BACKEND_PORT}/api/v1/health"; then
+              echo ""
+              echo "backend healthy after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "backend did not become healthy in time"
+          exit 1
+
+      - name: Show service status
+        if: always()
+        run: docker compose ps
+
+      - name: Show backend logs
+        if: failure()
+        run: docker compose logs backend --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans
