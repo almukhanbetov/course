@@ -473,6 +473,56 @@ No real production values were hardcoded anywhere (instruction 4) — the new st
 - **No change to which values are considered optional beyond SMTP** — `PAYMENT_PROVIDER`, `S3_*`, and the various numeric-default config values are still unvalidated by this step, since instruction 2's list is the explicit, minimum scope for this fix, not a general config-linter.
 - **The placeholder-string duplication between the two files is not resolved**, only documented (see Design decisions).
 
+## Trigger-chain investigation — why the chain stalled after `c9b70b6` (this session)
+
+Scope: investigate why `CI Quality Gate` succeeding on `main` did not cascade into `Publish Production Images` or `Deploy to Production`, per a live observation (quality gate run #3 green, neither downstream workflow appeared). Fix the trigger issue only if a real one exists; no deploy, no application code touched.
+
+### Investigation performed
+
+Read `.github/workflows/quality-gate.yml`, `image-publish.yml`, and `deploy.yml` fresh. Checked exact `name:` fields against every `workflows: [...]` reference used by a `workflow_run` trigger — `image-publish.yml` listens for `"CI Quality Gate"`, matching `quality-gate.yml`'s `name:` exactly; `deploy.yml` listens for `"Publish Production Images"`, matching `image-publish.yml`'s `name:` exactly. No typo, no case mismatch. Checked `branches:`/`types:` filters on both (`branches: [main]`, `types: [completed]`) against the actual triggering event (a direct push to `main`) — correct. Checked both jobs' `if:` conditions (`workflow_run.conclusion == 'success'`) — correct for the `workflow_run` path.
+
+Since nothing in the trigger *matching logic* itself was wrong, ran `git show --stat c9b70b6` to see exactly what that push changed: **only `.github/workflows/deploy.yml` (new), `docker-compose.prod.yml` (new), and `STAGE28_PROGRESS.md`.** `image-publish.yml` and `quality-gate.yml` were untouched by this push — they're byte-identical to the versions that already ran successfully once before (image-publish.yml's own first live run, recorded earlier in this file's post-session update).
+
+### Root cause identified
+
+**`deploy.yml` did not exist on `main` before this push introduced it.** GitHub's documented behavior for `workflow_run`: the *listening* workflow must already exist on the default branch to be eligible to receive a completion event from its upstream workflow — a workflow introduced in the very same push that would trigger its first potential upstream event cannot catch that first cycle; there is no retroactive matching. This is a one-time bootstrapping gap inherent to how GitHub registers new `workflow_run` listeners, not a defect in `deploy.yml`'s trigger definition, which is syntactically and semantically correct as written.
+
+This fully explains why `Deploy to Production` never appeared. It does not, on its own, explain why `Publish Production Images` (not new, previously proven working) also produced no new run — no defect was found in its trigger config either; the most likely explanation is simply that no fresh `workflow_run` completion event for it had occurred since its own last run, and this investigation found no code-level reason to expect a new one from this particular push chain alone.
+
+### Fix applied
+
+No bug existed in any trigger-matching logic (names, branches, types, or `if:` conditions were all already correct), so nothing needed correcting there. Instead, added a **manual escape hatch** — `workflow_dispatch` — to `image-publish.yml`, matching the trigger `deploy.yml` already had:
+
+- `.github/workflows/image-publish.yml`: added `workflow_dispatch:` alongside the existing `workflow_run:` trigger.
+- **Two follow-on fixes this immediately required, caught by tracing the run through under the new trigger rather than assuming it would just work:**
+  1. `verify-inputs`'s `if:` condition was `github.event.workflow_run.conclusion == 'success'` only — under `workflow_dispatch`, `github.event.workflow_run` doesn't exist, so that expression evaluates falsy and the job would have silently skipped itself, defeating the entire point of adding a manual trigger. Fixed to `github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'`, the exact pattern `deploy.yml`'s own `deploy` job already uses correctly.
+  2. The `publish` job's checkout `ref:` and SHA-computation step both read `github.event.workflow_run.head_sha` directly, with no fallback — under `workflow_dispatch` this is empty, which would have produced a broken `sha-` tag (the prefix with nothing after it) rather than a real commit reference. Fixed both to `github.event.workflow_run.head_sha || github.sha`, again mirroring `deploy.yml`'s already-correct fallback pattern exactly.
+
+`deploy.yml` needed no changes — it already has `workflow_dispatch` and the correct `||`-fallback pattern in both places; it was used as the reference implementation for fixing `image-publish.yml`.
+
+### Files changed
+
+- `.github/workflows/image-publish.yml` — added `workflow_dispatch` trigger; fixed `verify-inputs`'s `if:` condition; added `|| github.sha` fallback to the checkout ref and SHA-computation step.
+- `STAGE28_PROGRESS.md` — this section added.
+
+No application code touched. No deploy attempted. No push made by this session.
+
+### Verification performed
+
+- `python3 -c "yaml.safe_load(...)"` — `image-publish.yml` still parses cleanly; confirmed both `workflow_run` and `workflow_dispatch` present under `on:`.
+- `actionlint` across all six workflow files — **zero findings**.
+- Simulated the fixed `if:` logic directly: `workflow_dispatch` (no `workflow_run` context) → job runs; `workflow_run` + `conclusion=success` → job runs; `workflow_run` + `conclusion=failure` → job correctly skipped.
+- Simulated the SHA-fallback logic directly: empty `workflow_run.head_sha` (the `workflow_dispatch` case) → falls back to `github.sha`; a real `head_sha` present → used as-is, fallback never triggered.
+
+### What exact push/re-run is needed next
+
+**No push is required.** Everything needed is already on `main` as of `c9b70b6`, plus this session's fix once committed. The concrete next steps, in order:
+
+1. Commit and push this fix (not done by this session, per instruction).
+2. From the Actions tab, open **Publish Production Images** and use **Run workflow** (the new `workflow_dispatch` trigger) on `main`. This exercises the exact same build-and-push logic that already worked once before, now runnable on demand.
+3. If that run succeeds, **Deploy to Production** should fire automatically via its own `workflow_run` listener — and this time it genuinely can, since `deploy.yml` now already exists on `main` (the one-time bootstrapping gap identified above no longer applies).
+4. What happens next depends entirely on whether the 4 `PROD_VPS_*` secrets are configured: if not, `deploy.yml` fails immediately and harmlessly at `Verify required secrets are present`, exactly as designed; if they are configured and point at a real host, this is a real deployment attempt.
+
 ## Remaining for Stage 28 (not started)
 
 28A2 covered the Dockerfile-hardening work 28A1 anticipated as its own session together with the GHCR build/publish workflow (confirmed live, see the post-session update above). 28A3 (this session) built the actual VPS deploy workflow and production compose override — designed, built, and validated as thoroughly as possible without a real server, but never executed against one. What's left:
