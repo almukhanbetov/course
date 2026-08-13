@@ -6,8 +6,10 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /out/api ./cmd/api
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates && \
+    adduser -D -u 10001 appuser
 WORKDIR /app
-COPY --from=build /out/api ./api
+COPY --from=build --chown=appuser:appuser /out/api ./api
+USER appuser
 EXPOSE 8080
 ENTRYPOINT ["./api"]

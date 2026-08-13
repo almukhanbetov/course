@@ -11,7 +11,9 @@ FROM alpine:3.20
 # and ffprobe binaries this worker shells out to.
 RUN apk add --no-cache ca-certificates ffmpeg && \
     ffmpeg -version && \
-    ffprobe -version
+    ffprobe -version && \
+    adduser -D -u 10001 appuser
 WORKDIR /app
-COPY --from=build /out/video-worker ./video-worker
+COPY --from=build --chown=appuser:appuser /out/video-worker ./video-worker
+USER appuser
 ENTRYPOINT ["./video-worker"]

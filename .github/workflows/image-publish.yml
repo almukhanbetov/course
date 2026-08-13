@@ -1,0 +1,99 @@
+name: Publish Production Images
+
+# Runs only after CI Quality Gate (Stage 27) completes on main — see the
+# `if:` guard below, which further restricts this to only its *successful*
+# runs. Deliberately not `push`/`pull_request` directly: publishing an image
+# to the registry namespace this design treats as a deployment source of
+# truth (STAGE28_PROGRESS.md) should never happen for a commit the gate
+# hasn't already verified, and never for arbitrary PR branches.
+"on":
+  workflow_run:
+    workflows: ["CI Quality Gate"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Fails closed, before any build starts, if a build input this workflow
+  # depends on isn't configured — mirrors STAGE28_PROGRESS.md's own stated
+  # failure-conditions philosophy ("fail closed if a required
+  # secret/value is missing"), extended here to a required (non-secret)
+  # repository variable.
+  verify-inputs:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required build inputs are configured
+        run: |
+          if [ -z "${{ vars.PROD_NEXT_PUBLIC_API_URL }}" ]; then
+            echo "The 'PROD_NEXT_PUBLIC_API_URL' repository/environment variable is not set."
+            echo "Next.js bakes NEXT_PUBLIC_* values into the client bundle at build time, not runtime — without it the frontend image would silently ship with an empty API URL."
+            exit 1
+          fi
+          echo "Required build inputs present."
+
+  publish:
+    needs: verify-inputs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            context: backend
+            dockerfile: backend/Dockerfile
+          - image: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+          - image: video-worker
+            context: backend
+            dockerfile: backend/Dockerfile.worker
+          - image: notification-worker
+            context: backend
+            dockerfile: backend/Dockerfile.notification-worker
+          - image: code-runner
+            context: backend
+            dockerfile: backend/Dockerfile.runner
+
+    steps:
+      - name: Checkout the exact commit the quality gate verified
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Compute short SHA tag
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Only the frontend image needs a build-arg — Next.js inlines
+      # NEXT_PUBLIC_* values into the client bundle at build time (see
+      # frontend/Dockerfile's ARG NEXT_PUBLIC_API_URL). The other four
+      # images take no build-time configuration at all; their runtime
+      # config comes entirely from container env vars, unrelated to the
+      # image build itself.
+      - name: Build and push ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ matrix.image == 'frontend' && vars.PROD_NEXT_PUBLIC_API_URL || '' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/course-${{ matrix.image }}:sha-${{ steps.sha.outputs.short }}
+            ghcr.io/${{ github.repository_owner }}/course-${{ matrix.image }}:latest
