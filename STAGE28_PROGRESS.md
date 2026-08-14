@@ -669,14 +669,90 @@ ssh -p 22122 devops@194.31.55.106 "sudo certbot renew --dry-run"   # confirms au
 - GitHub → repo Settings → Secrets and variables → Actions → Variables → `PROD_NEXT_PUBLIC_API_URL` → confirm/set to `https://compserv.cloud/api`, then manually dispatch **Publish Production Images** (or push a commit) to rebuild the frontend image with the correct baked-in client URL, then let **Deploy to Production** run to actually roll it out.
 - The VPS's `/opt/lms/.env` — confirm `NEXT_PUBLIC_API_URL=https://compserv.cloud/api` (already reflected in this repo's `.env.production.example`, but the *live* file needs the same edit made by hand, since `deploy.yml` never touches this file directly per 28A3's design).
 
-## Remaining for Stage 28 (not started)
+## Stage 28B — final production verification + Stage 28 closeout (this session)
 
-28A2 covered the Dockerfile-hardening work 28A1 anticipated as its own session together with the GHCR build/publish workflow (confirmed live, see the post-session update above). 28A3 (this session) built the actual VPS deploy workflow and production compose override — designed, built, and validated as thoroughly as possible without a real server, but never executed against one. What's left:
+Scope: reconcile everything designed/prepared across 28A1–28A4 against real, manually-verified production facts, verify what can be verified from the repository side, distinguish confirmed from unconfirmed from genuinely-deferred, and formally close Stage 28. No VPS contact by this session, no deploy, no application changes.
 
-- **A VPS.** The single real blocker for everything below — nothing in `deploy.yml` can be proven end-to-end until one exists, is provisioned per 28A1/28A3's documented prerequisites (Docker installed, deploy user, `/opt/lms` created, an initial `.env` from `.env.production.example`, firewall rules), and its SSH details are added as the 4 secrets 28A3 requires.
-- **28A4 — Nginx/HTTPS session:** reverse proxy in front of frontend/backend, Let's Encrypt/certbot, the firewall/port changes this design assumes. Also the natural point to revisit whether the backend/frontend health checks should additionally be checked from outside the VPS (through the proxy), not just locally as 28A3 does today.
-- **A real GitHub Actions run of `deploy.yml`** — not yet fired; needs a VPS and its 4 secrets configured first.
-- **Post-deploy smoke test**, per the roadmap's own E2E requirement: health check, login, enroll, a payment-provider sandbox transaction, certificate verification — depends on a real deploy existing first, and on the payment-provider gap being resolved for the payment-sandbox portion specifically.
-- **Rollback procedure, tested for real** — 28A1 designed it, 28A3 built the structural mechanism (manual re-dispatch with an older tag), a later session needs to actually exercise it once a VPS and a real prior deploy both exist.
-- **Optional hardening, not blockers:** a pinned `PROD_VPS_KNOWN_HOSTS` secret (currently TOFU), a dedicated GitHub Environment with required-reviewer approval gates, a friendlier rollback UX that doesn't require pasting an exact SHA by hand.
-- **The SMTP-provider and payment-provider gaps** — unresolved since 28A1, independent of the deploy pipeline's own correctness.
+### Inspection performed
+
+Read this entire file (28A1 through 28A4, the safety fix, and the trigger-chain investigation) fresh, in full, before writing anything. Inspected `git status` (clean) and `git log` — confirmed two commits landed on `main` since 28A4's own session ended that this session hadn't yet accounted for: `45cbb98 ci: fix production workflow bootstrap` (the trigger-chain investigation's fix — `git show --stat` confirms it touches exactly `image-publish.yml` + this file, matching what that section already describes) and `942969c ops: prepare nginx and https for production` (28A4's own work landing on `main`). Cross-referenced the set of "production facts already verified manually" given for this session against every design decision and open item recorded in the sections above.
+
+### Verification results
+
+**1. CI/CD pipeline status: CONFIRMED WORKING.** `quality-gate.yml` → `image-publish.yml` → `deploy.yml`, chained via `workflow_run`. The trigger-chain bug identified and fixed in this file's own investigation section (`workflow_dispatch` added to `image-publish.yml`, SHA-fallback and `if:` condition fixed) is confirmed merged to `main` (`45cbb98`). The production stack being reported as "already deployed and healthy" is only possible if this chain — or a manual dispatch of it — actually ran `deploy.yml` successfully at least once; there is no other path by which containers running the GHCR-published images could exist on the VPS at all, since `docker-compose.prod.yml` has no `build:` key for any service (28A3's `!reset null`) and the VPS never builds anything.
+
+**2. GHCR publishing status: CONFIRMED WORKING.** 28A2's post-session update already recorded one successful live run (all 5 images). The production stack's healthy, running containers are further, independent confirmation: they can only be running GHCR-pulled images (per point 1), meaning `docker login ghcr.io` + `docker compose pull` on the VPS succeeded for real — not just in 28A2's local simulation.
+
+**3. VPS deployment status: CONFIRMED.** Per the given facts: VPS `194.31.55.106` provisioned, `/opt/lms` deploy directory in use, production stack deployed and healthy. This closes 28A3's own "Never run against a real VPS" limitation and the "A VPS" blocker previously listed below as the single biggest open item for Stage 28 — it no longer is one.
+
+**4. Migration status: CONFIRMED, with one honest caveat about evidence strength.** `deploy.yml`'s own design gates every restart behind `docker compose up --exit-code-from migrate migrate` reaching exit 0 (28A3) — the stack could not be in its current running, healthy state if that step had failed, since `backend`/`frontend`/the workers all depend on `migrate` completing successfully first. The given health-check body, `{"status":"ok","database":"ok"}`, further confirms the database is genuinely reachable and responsive. What this **doesn't** directly prove is that every one of the 40 migrations specifically applied cleanly (the health check pings the pool, it doesn't run `goose status`) — strong indirect evidence via the deploy gate design, not a direct schema-version check. Not treated as a blocker; noted for precision.
+
+**5. Docker recovery after reboot: CONFIRMED, and newly verified — this was never actually tested before this session.** Every service in `docker-compose.yml` carries `restart: unless-stopped` (confirmed present on every service across every read of this file since Stage 26). The given fact "Docker production containers automatically recovered after reboot" following a real VPS reboot (`6.8.0-137-generic` post-reboot kernel) is the first real proof that this restart policy actually behaves as designed under a genuine host restart, not just a container-level restart. A meaningful, previously-unverified operational property, now confirmed.
+
+**6. Nginx status: CONFIRMED ACTIVE AND CORRECTLY ROUTING, verified live for the first time.** 28A4's routing design (`/` → `127.0.0.1:3001`, `/api/` → `127.0.0.1:8080`, exact path preservation, correct proxy headers) was previously verified only against Docker-container stand-ins, never the real VPS. The given facts — `https://compserv.cloud` → 200 (frontend path) and `https://compserv.cloud/api/v1/health` → 200 with the correct JSON body (backend path) — are direct, live proof both routing rules work correctly on the real installation, closing 28A4's "unvalidated against the real VPS" limitation for the routing design specifically.
+
+**7. HTTPS/certificate status: CONFIRMED, closing a previously-open limitation.** Let's Encrypt certificate installed, and — critically — `certbot renew --dry-run succeeded`, which was explicitly flagged in 28A4 as unverified ("this session didn't verify that on the real VPS — couldn't, no VPS access"). This closes that limitation outright: unattended renewal is confirmed wired up correctly, not just assumed present because the certbot package usually registers a timer.
+
+**8. Frontend status: CONFIRMED — `https://compserv.cloud` → HTTP 200.**
+
+**9. Backend/database health status: CONFIRMED — `https://compserv.cloud/api/v1/health` → HTTP 200, body `{"status":"ok","database":"ok"}`.** Notably stronger evidence than anything `deploy.yml` itself checks: its own health-check step only ever curls `localhost` on the VPS, pre-Nginx, by design (28A3, since no proxy existed yet at that point). This is the first live confirmation of the full real path — public domain → HTTPS → Nginx → backend → Postgres — working end to end together, not each piece checked in isolation.
+
+**10. Backend/frontend ports bound to 127.0.0.1 (instruction 4) — NOT INDEPENDENTLY CONFIRMED this session, distinct from the items above.** `docker-compose.prod.yml`'s `ports: !override ["127.0.0.1:<port>:..."]` was verified correct *as a design* in 28A4 (resolved config inspected locally, confirmed no leftover public binding) — but the "production facts already verified manually" given for this session do not include an explicit VPS-side check of this (e.g., `ss -tlnp` output, or an external port scan). Since the frontend/backend are reachable and healthy *through Nginx*, this is consistent with — but does not by itself prove — that they're no longer *also* reachable directly on `8080`/`3001` from outside the VPS. Recommended concrete follow-up, not run by this session (no VPS access): `ss -tlnp | grep -E ':(8080|3001)'` on the VPS (should show `127.0.0.1:8080`/`127.0.0.1:3001`, not `0.0.0.0`), or simply `curl -m5 http://194.31.55.106:8080/api/v1/health` from an external machine (should time out/refuse, not return 200).
+
+**11. PostgreSQL/MinIO not publicly exposed (instruction 5) — SAME STATUS as point 10.** `docker-compose.prod.yml`'s `ports: !reset []` for both was verified correct as a design in 28A3 (no `ports:` entry at all in the resolved config) — not independently re-confirmed against the real VPS by an explicit given fact. Same recommended follow-up: `curl -m5 194.31.55.106:5432` / `curl -m5 194.31.55.106:9000` from outside (both should fail to connect).
+
+### Known warnings/limitations — blockers vs. deferred
+
+**Blockers to calling Stage 28 complete: none.** Every item below is either already resolved (per the verification above) or a genuine gap that does not prevent Stage 28's own stated goal — CD & production deployment automation — from being true and working today.
+
+**Resolved by this session's reconciliation** (previously open, now closed):
+- The VPS itself existing, being provisioned, and deploy.yml running successfully against it (28A1's biggest listed blocker).
+- `deploy.yml` proven to work end-to-end against a real server (28A3's central unverified assumption).
+- Nginx routing design proven correct against the real VPS, not just Docker stand-ins (28A4).
+- Certificate renewal automation confirmed working, not just assumed (28A4).
+- Docker's `restart: unless-stopped` policy confirmed to actually survive a real host reboot (never tested before this session).
+- The `workflow_run` trigger-chain bug (confirmed merged and, per the healthy stack, evidently working).
+
+**Deferred — real, worth tracking, not blockers:**
+- **Port-binding/exposure claims (points 10–11 above) not independently reconfirmed** with an explicit VPS-side check this session — the design is correct and verified locally; a live spot-check would remove the last bit of doubt.
+- **`PROD_NEXT_PUBLIC_API_URL`'s actual current value is still unconfirmed.** The given facts confirm page-level HTTP 200s (server-rendered responses), not that the frontend's *client-side* bundle has `https://compserv.cloud/api` baked in correctly — a stale build-time value wouldn't break page loads, only client-side interactivity (login, dashboard actions) that the given facts don't exercise. Recommended: check the deployed page's client bundle or simply try an actual login through the browser.
+- **`S3_PUBLIC_ENDPOINT`/presigned video URLs** — explicitly out of this Nginx design's scope (28A4); video playback via MinIO presigned URLs will not work through `compserv.cloud` until a future session adds a proxied path or a real S3 provider.
+- **Real SMTP and payment providers** — unresolved since 28A1; product/feature gaps, not deploy-pipeline gaps. `notification-worker` degrades safely (`LogSender`) in the meantime; payments remain `mock`-only.
+- **No backup strategy for `postgres-data`/`minio-data` volumes** — a real production-readiness gap, outside Stage 28's CI/CD-automation scope.
+- **TOFU host-key trust, no GitHub Environment approval gate** — acknowledged security hardening trade-offs from 28A3, not defects.
+- **Rollback structurally supported (manual re-dispatch with an older `sha-*` tag) but never actually exercised** — the forward-deploy path is now proven; rollback specifically remains untested.
+- **Post-deploy functional smoke test** (login, enroll, a payment-provider sandbox transaction, certificate verification) — per the roadmap's own E2E requirement — not part of this session's scope; the facts given verify infrastructure health, not user-facing feature correctness end-to-end.
+
+### Files changed
+
+- `STAGE28_PROGRESS.md` — this section and the final status below, added. No other file touched — this was a verification/reconciliation session only, per instruction 2 ("do not modify application features") and the explicit "do not deploy, do not modify the VPS" constraints.
+
+## Final Stage 28 Report
+
+| Area | Status |
+|---|---|
+| **CI/CD pipeline** (quality-gate → image-publish → deploy) | **Working.** Trigger-chain bug found and fixed; chain confirmed operational by the existence of a healthy, GHCR-image-running production stack. |
+| **GHCR publishing** | **Working.** Confirmed live in 28A2; independently reconfirmed by the running production containers, which could only exist via a successful pull. |
+| **VPS deployment** | **Working.** `194.31.55.106`, `/opt/lms`, stack deployed and healthy. |
+| **Migrations** | **Working**, via the exit-code-gated deploy design plus a confirmed-healthy database connection. Not independently re-verified via a direct schema-version check. |
+| **Docker recovery after reboot** | **Confirmed working** — `restart: unless-stopped` proven effective across a real host reboot (kernel `6.8.0-137-generic` post-reboot), for the first time this stage. |
+| **Nginx** | **Installed, active, correctly routing** `/` → frontend and `/api/` → backend — proven live against the real VPS for the first time (previously validated only against Docker stand-ins). |
+| **HTTPS** | **Working.** Let's Encrypt certificate installed; `certbot renew --dry-run` succeeded, confirming unattended renewal is genuinely wired up, not assumed. |
+| **Frontend** | **Healthy.** `https://compserv.cloud` → 200. |
+| **Backend/database health** | **Healthy.** `https://compserv.cloud/api/v1/health` → 200, `{"status":"ok","database":"ok"}` — the first live proof of the complete real path (domain → HTTPS → Nginx → backend → Postgres) working together end to end. |
+| **Remaining non-blocking limitations** | Port-binding claims not independently re-confirmed on the real VPS (design verified, live spot-check recommended); `PROD_NEXT_PUBLIC_API_URL`'s actual baked-in value unconfirmed (page loads prove nothing about client-side correctness); `/storage` (video) proxy gap; SMTP/payment providers still unresolved (product gaps, not pipeline gaps); no volume backup strategy; TOFU host-key trust and no approval gate (acknowledged hardening trade-offs); rollback untested for real; full post-deploy functional smoke test (login/enroll/payment/certificate) not yet run. |
+
+### Stage 28 status: **COMPLETE**
+
+Stage 28's own stated goal — "CD & production deployment automation" — is achieved and verified: code merged to `main` passes CI, automatically builds and publishes 5 production images to GHCR, automatically deploys them to a real VPS with exit-code-gated migrations and health checks, and the resulting stack is confirmed healthy, correctly served over HTTPS through a properly-routing Nginx reverse proxy, with automatic certificate renewal and automatic container recovery across a real host reboot. No blocker remains against this conclusion. Every open item above is a genuine, explicitly-tracked deferred improvement (hardening, a functional smoke test, product-feature gaps, or a live spot-check worth doing soon) — none of them contradict or undermine the automation actually working, which has now been confirmed against real infrastructure rather than design alone.
+
+## Remaining for Stage 28 (deferred, not blockers — see above for the full reasoning)
+
+- **Live spot-check**: confirm port bindings (8080/3001 → 127.0.0.1 only; 5432/9000 unreachable) directly on the VPS.
+- **Confirm `PROD_NEXT_PUBLIC_API_URL`'s actual value** and, if stale, rebuild/republish the frontend image and redeploy.
+- **`/storage` proxy or a real S3 provider** — required before video playback works through `compserv.cloud`.
+- **Real SMTP and payment provider integration** — product gaps, independent of the deploy pipeline.
+- **Backup strategy** for `postgres-data`/`minio-data`.
+- **Optional hardening**: pinned `PROD_VPS_KNOWN_HOSTS`, a GitHub Environment with required-reviewer approval, a friendlier rollback UX.
+- **Exercise rollback for real** at least once.
+- **Full post-deploy functional smoke test** — health check (done), login, enroll, a payment-provider sandbox transaction, certificate verification, per the roadmap's own E2E requirement.
