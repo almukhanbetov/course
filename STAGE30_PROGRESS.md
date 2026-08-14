@@ -168,6 +168,54 @@ All against a purpose-built, throwaway Docker Compose project (`postgres:17-alpi
 
 ### Remaining work
 
-- **30A2:** Decrypt + `pg_restore` a real backup artifact into a scratch database; verify row counts/integrity against the source. This session proved the artifact is genuinely encrypted (`openssl enc'd data`) and structurally sound (correct size relationship, `pg_dump -Fc` format) but never decrypted/restored it — that's 30A2's explicit job.
 - **30A3:** Retention policy (with a dry-run step before real deletion) + a runbook that reflects the exact commands 30A2 proves work.
 - Before the schedule in `backup.yml` starts having real effect: set `BACKUP_ENCRYPTION_PASSPHRASE` on the production VPS's `.env` by hand (see Configuration required above).
+
+---
+
+## Stage 30A2 — Restore verification (implemented)
+
+Scope: actually restore a real backup artifact produced by 30A1's mechanism into a scratch database, and verify row counts/integrity against the source — the roadmap's own explicit standard: "a backup that has never been restored is not a verified backup." No retention policy, no runbook (30A3), no VPS contact, no application code changes.
+
+### What counted as "production" this session
+
+This sandbox has no reachable VPS (no `PROD_VPS_*` SSH secrets, and contacting a real production host is out of scope for local sessions regardless). The only genuinely "real" (non-throwaway, non-synthetic) Postgres+MinIO available is this project's own running dev stack (`course-postgres-1` / `course-minio-1`, seeded with real application data — courses, modules, lessons, roles, etc., not 30A1's synthetic `backup_test_marker` row). That stack was treated as the stand-in for "production" for instruction 1 ("Run one real production backup"): `pg_dump` was run against it exactly as `run-backup.sh` would against the real VPS, but **no restore was ever performed into it or any other component of that stack** — every restore in this session targeted a brand-new, isolated container (`lms-restore-test`, default bridge network, its own volume), never `course_default`'s network, never `course-postgres-1`. The dev stack was confirmed running and healthy, unaffected, both before and after this session's work.
+
+### Bug found and fixed: `run-backup.sh`'s `.env` sourcing broke on the project's real `.env` format
+
+Running the unmodified 30A1 script against the actual `.env` (not 30A1's own synthetic throwaway `.env`) failed immediately: `./.env: line 76: Platform: command not found`. Root cause: `SMTP_FROM_NAME=LMS Platform` is valid, unquoted docker-compose `.env` syntax (present identically in `.env.example` and `.env.production.example` — i.e. this is the project's real convention, not a one-off typo in a dev file), but `run-backup.sh` loaded `.env` via bash's `. ./.env` (source), which requires bash-valid syntax and interprets the unquoted space as "run command `Platform` with `SMTP_FROM_NAME=LMS` in its environment." This would have broken the *real* production backup the first time it ran against the real production `.env`, not just this local one — a genuine, previously-undiscovered blocker in the mechanism 30A1 marked "implemented," only surfaced by 30A2's instruction to run it for real rather than against a curated test fixture.
+
+Fixed in `deploy/backup/run-backup.sh` by replacing the bash `source` with a line-by-line `KEY=VALUE` parser (`while IFS='=' read -r key value; do export "$key=$value"; done < <(grep ... .env)`) that tolerates unquoted spaces in values without requiring the `.env` file itself to be rewritten into bash-safe syntax it was never meant to follow. Verified: `bash -n` syntax check passes; the real backup below succeeded end-to-end using this fixed script, unmodified from that point on, for every other step in this session.
+
+### Verification performed (all real, live, against the artifact this session's own real backup produced)
+
+1. **Real backup, live, once, against the dev stack's real data** (not synthetic seed data): `DEPLOY_DIR="$(pwd)" bash deploy/backup/run-backup.sh` → `pg_dump OK (123923 bytes)` → `encryption OK (123952 bytes)` → uploaded → independently re-verified → `SUCCESS - backups/lms-backup-20260814T134238Z.dump.enc (123952 bytes)`.
+2. **Independent existence check (instruction 2)**: a separate `mc stat --json` call (not reusing the script's own verification) confirmed the object at `lms-videos/backups/lms-backup-20260814T134238Z.dump.enc`, size 123952 bytes, matching the script's own report.
+3. **Downloaded that exact artifact (instruction 3)** via a separate `mc cp`; `file` identified it as genuine `openssl enc'd data with salted password`, not a plaintext dump.
+4. **Decrypted with `BACKUP_ENCRYPTION_PASSPHRASE` (instruction 4)**: `openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000`, output 123923 bytes (exactly matching the pre-encryption `pg_dump` size), `file` identified it as a genuine `PostgreSQL custom database dump - v1.16-0`.
+5. **Restored into a temporary isolated Postgres container (instructions 5–6)**: a fresh, throwaway `postgres:17-alpine` container (`lms-restore-test`, default bridge network — not `course_default`, its own new volume, no shared state with `course-postgres-1`), `pg_restore --no-owner --no-privileges` — exit code 0, zero errors, all FK constraints recreated.
+6. **Schema comparison (instruction 7)**: `pg_tables` listing for both databases — 43/43 tables, byte-identical `diff`.
+7. **Representative row-count comparison (instruction 7)**: every one of the 41 application tables (all tables excluding the two schema-listing rows already covered) compared source vs. restored in one pass — `diff` of the two count sets was empty, i.e. **every table's row count matched exactly**, including non-zero real data (`achievements: 8`, `answers: 20`, `categories: 4`, `courses`/`modules`/`lessons` populated) and legitimately-empty tables (`payments`, `course_enrollments`, etc. — genuinely empty in this dev seed, not a restore gap).
+8. **Restored DB usability (instruction 8)**: a real multi-table join (`courses` ⋈ `modules` ⋈ `lessons`) returned correct, sensible grouped results; a foreign-key violation was correctly rejected (`lessons_module_id_fkey`) proving constraints are live, not just present in the dump; a real `INSERT`/`SELECT`/`ROLLBACK` round-trip proved the restored database accepts writes, not just reads.
+9. **Wrong passphrase fails cleanly (instruction 9)**: decrypting the real artifact with an incorrect passphrase failed immediately — `openssl enc`: `bad decrypt`, exit code 1. The garbage partial output it did write (openssl's own documented behavior — it doesn't buffer the whole file before failing) was independently confirmed non-restorable too (`pg_restore: error: input file does not appear to be a valid archive`) before being deleted — no path from a wrong passphrase to a false-positive restore.
+10. **Corrupted backup fails cleanly (instruction 10)**: flipped one bit mid-file in a copy of the real encrypted artifact. Decryption with the *correct* passphrase "succeeded" (AES-CBC only corrupts the flipped block and the one following it, not the whole stream) but produced a structurally broken dump; `pg_restore` correctly rejected it (`unexpected data offset flag 74`, exit code 1) before any data could reach a database. Confirms integrity is actually checked at the archive-format layer, not just the encryption layer — a corrupted backup cannot silently restore wrong/partial data.
+11. **Cleanup (instruction 11)**: `lms-restore-test` container removed; all scratch files (downloaded/decrypted/corrupted artifacts) deleted; the test `BACKUP_ENCRYPTION_PASSPHRASE` added to the local `.env` for this session was removed afterward, returning `.env` to its exact prior state (it's gitignored — never committed, never touched in git history). The real backup artifact itself (`backups/lms-backup-20260814T134238Z.dump.enc`) was **not** deleted — it's the legitimate output of 30A1's mechanism, not a temporary restore resource, and deleting it is 30A3's (retention policy) job, not this session's.
+12. **Dev stack integrity**: `course-postgres-1` and every other `course-*` container confirmed running/healthy, unaffected, both before and after every step above.
+
+### Files changed
+
+- `deploy/backup/run-backup.sh` (modified) — fixed the `.env`-loading bug described above. No other logic changed.
+- `STAGE30_PROGRESS.md` (this section).
+
+### Not done this session
+
+- **No retention policy, no runbook** — belongs to 30A3, not started.
+- **No real VPS contact** — `BACKUP_ENCRYPTION_PASSPHRASE` still has not been set on the actual production VPS; this session's "real backup" was against the local dev stack, the closest available analog (see above), not the deployed VPS.
+- **No application code touched.**
+- **Production database was never written to** — only `pg_dump` (read-only) ran against it; every restore targeted an isolated throwaway container.
+- **30B1, 30B2, 30B3 not started.**
+
+### Remaining work
+
+- **30A3:** Retention policy (with a dry-run step before real deletion) + a runbook reflecting the exact commands this session proved work end-to-end.
+- Set `BACKUP_ENCRYPTION_PASSPHRASE` on the real production VPS's `.env` by hand when that VPS exists/is reachable (still not done — out of scope for a local sandbox session).

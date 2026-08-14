@@ -25,10 +25,21 @@ if [ ! -f .env ]; then
   echo "backup: .env not found in $DEPLOY_DIR" >&2
   exit 1
 fi
-set -a
-# shellcheck disable=SC1091
-. ./.env
-set +a
+
+# Not `. ./.env` (bash source): docker-compose's own .env format allows
+# unquoted values containing spaces (e.g. `SMTP_FROM_NAME=LMS Platform`,
+# present in this project's real .env since Stage 1) which are valid for
+# compose's own var-substitution but are not valid bash syntax — sourcing
+# them directly aborts the script (`Platform: command not found`) before
+# it ever reaches Postgres/MinIO. Parsing line-by-line instead tolerates
+# that same format without requiring the .env file itself to be rewritten
+# into bash-safe syntax it was never meant to follow.
+while IFS='=' read -r key value; do
+  case "$key" in
+    ''|'#'*) continue ;;
+  esac
+  export "$key=$value"
+done < <(grep -v '^\s*#' .env | grep '=')
 
 # Fail closed before touching Postgres/MinIO at all — same philosophy as
 # deploy.yml's own "Validate critical production config" step (Stage 28A3
