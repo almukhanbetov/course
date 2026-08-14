@@ -523,6 +523,152 @@ No application code touched. No deploy attempted. No push made by this session.
 3. If that run succeeds, **Deploy to Production** should fire automatically via its own `workflow_run` listener — and this time it genuinely can, since `deploy.yml` now already exists on `main` (the one-time bootstrapping gap identified above no longer applies).
 4. What happens next depends entirely on whether the 4 `PROD_VPS_*` secrets are configured: if not, `deploy.yml` fails immediately and harmlessly at `Verify required secrets are present`, exactly as designed; if they are configured and point at a real host, this is a real deployment attempt.
 
+## Stage 28A4 — production Nginx + HTTPS preparation (this session)
+
+Scope: design and prepare host-level Nginx configuration for `compserv.cloud` in front of the already-deployed, healthy production stack, plus a Certbot/Let's Encrypt path. No VPS contact, no deploy, no application code changes.
+
+### Inspection performed
+
+Read this file (28A1–28A3 plus the trigger-chain investigation), `docker-compose.yml`, `docker-compose.prod.yml`, and `.github/workflows/deploy.yml` fresh. Inspected the frontend's actual API-client code (`frontend/lib/api.ts`) rather than assuming: `apiBaseUrl()` returns `SERVER_API_URL` (`API_INTERNAL_URL`) when running server-side and `PUBLIC_API_URL` (`NEXT_PUBLIC_API_URL`) when running in the browser (`typeof window === "undefined"` check) — confirming the browser genuinely does make direct client-side fetches to the backend, not everything routed through a Next.js server proxy. Inspected the backend's router setup (`backend/cmd/api/main.go`): every route is registered under `router.Group("/api/v1")` — the literal `/api` prefix is part of every real route, not something a proxy should strip. Grepped the entire backend for `cors`/`CORS`/`Access-Control`/`gin-contrib` and for `FRONTEND_URL` across the whole repo — **found none of either**: this backend has no CORS middleware at all, and `FRONTEND_URL` isn't a config value that exists anywhere in this codebase. Checked the frontend for WebSocket usage (`grep -rln "WebSocket\|socket.io\|ws://"`) — found one hit, a comment in `lib/actions.ts` explicitly stating the opposite: `"no WebSocket, same interval-poll shape as VideoProcessingStatusPanel"` — this app deliberately doesn't use WebSockets, so `Upgrade`/`Connection` proxy headers aren't needed for anything currently real.
+
+### Findings that shaped the design
+
+- **No backend CORS exists, and none needs to be added.** Instruction 6 asked whether backend CORS needs changing for `https://compserv.cloud` — the honest answer is there's nothing to change because there's nothing there. The reason this is safe: with Nginx proxying `compserv.cloud/` to the frontend and `compserv.cloud/api/` to the backend, every browser request the frontend's client code makes lands on the **same origin** as the page itself (same scheme, same host, same port — only the path differs). Same-origin requests are never subject to CORS restrictions at all, by browser design. This only holds if `NEXT_PUBLIC_API_URL` is set to `https://compserv.cloud/api` (same-origin, path-based) — not to a different host or port, which would reintroduce a real cross-origin requirement with no CORS middleware to satisfy it.
+- **`FRONTEND_URL` doesn't exist in this codebase** — confirmed by grepping the whole repo, not assumed from the instruction's phrasing.
+- **`NEXT_PUBLIC_API_URL` matters in two genuinely different places, and both need to end up as `https://compserv.cloud/api`:**
+  1. **Baked into the frontend image's client bundle at build time**, by `image-publish.yml`'s build-arg, sourced from the GitHub Actions repository variable `PROD_NEXT_PUBLIC_API_URL` — **not** from anything in this repo's files. Editing `.env.production.example` or the VPS's `.env` does not change an already-built image. This variable's current value is unknown to this session (no `gh` CLI access) — it must be checked/updated, and the frontend image rebuilt and redeployed, for the *client-side* API URL to actually become `https://compserv.cloud/api`.
+  2. **Read live by any server-side code** that touches `process.env.NEXT_PUBLIC_API_URL` — this path *does* read the VPS's own `.env` at runtime. Updated `.env.production.example`'s `NEXT_PUBLIC_API_URL` to `https://compserv.cloud/api` accordingly (was a `__YOUR_PROD_DOMAIN__` placeholder).
+- **A real gap surfaced, not solved:** `.env.production.example`'s `S3_PUBLIC_ENDPOINT` was already templated as `https://__YOUR_PROD_DOMAIN__/storage` — implying a `/storage` proxy path that this session's Nginx design, per its exact explicit scope (`/` and `/api/` only), does not provide. MinIO has no public port at all (`docker-compose.prod.yml`'s `ports: !reset []`, from 28A3). Presigned video URLs built from this value will not resolve anywhere. Flagged explicitly in `.env.production.example` and here — not fixed, since it's outside this session's exact two-route scope and would need its own design decision (proxy `/storage` to MinIO, or move to a real S3 provider with its own endpoint).
+- **`backend`/`frontend` ports restricted to `127.0.0.1` in `docker-compose.prod.yml`.** `docker-compose.prod.yml` already stated the intent ("Nginx is the only service that should ever bind a public port") since 28A3 — this session follows through: now that Nginx is actually being designed, the raw application ports have no reason to stay reachable from outside the VPS. **Caught a real bug applying this**, the same class already hit once this session with `depends_on`: Compose's default merge behavior for list-type fields like `ports:` is to *concatenate*, not replace — a plain (unmarked) override would have left the base file's public `0.0.0.0` binding sitting alongside the new `127.0.0.1` one, achieving nothing. Fixed with `!override`; verified by resolving the actual merged config (not assumed) — confirmed exactly one `ports:` entry each, `host_ip: '127.0.0.1'`, no leftover public binding.
+- **No WebSocket support added to the Nginx config.** Checked, not assumed: this app doesn't use WebSockets anywhere today. Adding `Upgrade`/`Connection` proxy headers preemptively would be speculative complexity for a feature that doesn't exist — left out, noted here as trivial to add later if one ever is.
+- **`deploy.yml` needs no changes.** It only manages Docker Compose services; Nginx runs on the host, entirely outside its scope, per instruction 2. Its own backend/frontend health checks already run against `localhost:$BACKEND_PORT`/`localhost:$FRONTEND_PORT` directly, bypassing any proxy by design — unaffected by adding one.
+- **`proxy_pass` target form was deliberately chosen to avoid a real path-stripping bug**, not just written and assumed correct. `proxy_pass http://127.0.0.1:8080/;` (trailing slash) would have stripped the matched `/api/` location prefix, turning a request for `/api/v1/health` into `/v1/health` at the backend — which registers nothing there (everything lives under `/api/v1/...`, confirmed above). Used the bare form instead — `proxy_pass http://127.0.0.1:8080;` (no trailing path at all) — which Nginx passes the original request URI through completely unmodified, regardless of which location matched. Verified live (see Verification below), not just reasoned about.
+
+### Nginx design
+
+Two files, `deploy/nginx/compserv.cloud.pre-cert.conf` and `deploy/nginx/compserv.cloud.conf` — a deliberate two-stage design, not one file with commented-out sections, because Certbot's HTTP-01 challenge needs port 80 already serving `/.well-known/acme-challenge/` for the domain *before* a certificate can exist, so the HTTPS server block genuinely cannot be installed first.
+
+**Stage 1 (`compserv.cloud.pre-cert.conf`)** — HTTP only, installed first:
+- One `server { listen 80; }` block for `compserv.cloud`/`www.compserv.cloud`.
+- `location /.well-known/acme-challenge/ { root /var/www/certbot; }` — the path Certbot's webroot plugin writes challenge files into.
+- `location /api/` → `proxy_pass http://127.0.0.1:8080;` and `location /` → `proxy_pass http://127.0.0.1:3001;`, both with `Host`/`X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto` set, per instruction 4.
+
+**Stage 2 (`compserv.cloud.conf`)** — installed after a certificate exists:
+- Port 80 server block reduced to the ACME-challenge location (kept alive indefinitely, so unattended renewal keeps working) plus a `return 301 https://$host$request_uri;` redirect for everything else.
+- Port 443 server block with `ssl_certificate`/`ssl_certificate_key` pointing at the standard Certbot-managed paths (`/etc/letsencrypt/live/compserv.cloud/{fullchain,privkey}.pem`), explicit modern TLS settings (`TLSv1.2`/`TLSv1.3`, Mozilla "intermediate" baseline) rather than `include /etc/letsencrypt/options-ssl-nginx.conf` — that file is generated specifically by Certbot's *nginx plugin*, which this design deliberately doesn't use (see below), so depending on it would be depending on a file that might not exist.
+- Same `/api/` and `/` proxy blocks as Stage 1, carried over unchanged.
+
+**Why `certbot certonly --webroot`, not `certbot --nginx`:** the nginx plugin auto-edits whatever config it finds, in ways that are hard to review ahead of time or reproduce exactly — the opposite of what a "preparation" deliverable should be. `certonly --webroot` only obtains/renews the certificate file and touches nothing in `/etc/nginx` — every line of both config files here is something a human (or this session) actually wrote and can review, not something a plugin generated.
+
+### Verification performed
+
+**`nginx -t`, genuinely run** (via the official `nginx:alpine` image, no host install needed) **against the actual repo files**, not drafts assumed to be equivalent:
+- `deploy/nginx/compserv.cloud.pre-cert.conf` — **syntax OK, test successful**.
+- `deploy/nginx/compserv.cloud.conf` — validated with a real (throwaway, self-signed, generated purely for this test and discarded after) certificate mounted at the exact paths the config references, so Nginx's own certificate-loading logic was genuinely exercised, not just brace-matched — **syntax OK, test successful**.
+
+**End-to-end request routing, proven live, not reasoned about** — stood up two minimal Python echo servers (stand-ins for backend/frontend, each reporting exactly which path and headers they received) plus a real Nginx container running the same location/proxy_pass logic as the design, all on an isolated Docker network (removed afterward):
+
+| Request | Reached backend/frontend as | Correct? |
+|---|---|---|
+| `GET /api/v1/health` | `/api/v1/health` | Yes — full path preserved, not stripped to `/v1/health` |
+| `GET /api/v1/auth/login` | `/api/v1/auth/login` | Yes |
+| `GET /` | `/` | Yes |
+| `GET /dashboard/courses` | `/dashboard/courses` | Yes — frontend routing paths pass through untouched |
+
+**Proxy headers, confirmed actually received by the backend**, not just declared in the config: `Host`, `X-Real-IP`, `X-Forwarded-For` all arrived correctly. `X-Forwarded-Proto` was deliberately tested by sending a spoofed `X-Forwarded-Proto: https` header as the *client* — the backend received `X-Forwarded-Proto: http` instead, confirming `proxy_set_header X-Forwarded-Proto $scheme;` uses Nginx's own knowledge of the actual connection scheme and overrides whatever a client tries to inject, not a client-controllable passthrough. A real, useful security property, confirmed rather than assumed.
+
+**`docker compose config`**, re-verified after the `docker-compose.prod.yml` port changes: exactly one `ports:` entry each for `backend`/`frontend`, `host_ip: '127.0.0.1'`, no leftover public `0.0.0.0` binding from the base file.
+
+### Change made
+
+- `deploy/nginx/compserv.cloud.pre-cert.conf` — new.
+- `deploy/nginx/compserv.cloud.conf` — new.
+- `docker-compose.prod.yml` — `backend`/`frontend` now bind `127.0.0.1:<port>` instead of the base file's implicit `0.0.0.0`.
+- `.env.production.example` — `NEXT_PUBLIC_API_URL`/`S3_PUBLIC_ENDPOINT` placeholders replaced with real `compserv.cloud` values; both annotated with the build-time-vs-runtime distinction and the storage-proxy gap respectively.
+
+No application code changed. No VPS contacted. Nothing deployed.
+
+### Files changed
+
+- `deploy/nginx/compserv.cloud.pre-cert.conf` — new.
+- `deploy/nginx/compserv.cloud.conf` — new.
+- `docker-compose.prod.yml` — port bindings restricted to localhost.
+- `.env.production.example` — domain placeholders filled in, two gaps annotated.
+- `STAGE28_PROGRESS.md` — this section added.
+
+### Known limitations
+
+- **`PROD_NEXT_PUBLIC_API_URL`'s current GitHub Actions variable value is unknown to this session** (no `gh` CLI access) — must be checked and, if not already `https://compserv.cloud/api`, updated and the frontend image rebuilt/republished before the browser-side API URL is actually correct. Until that happens, the *already-deployed, currently-healthy* frontend keeps working exactly as it does now (this is a forward-looking change, not something broken today).
+- **`S3_PUBLIC_ENDPOINT`/presigned video URLs are not covered by this Nginx design** — flagged prominently in `.env.production.example` and above; video playback via presigned MinIO URLs will not work through `compserv.cloud` until a future session resolves it (proxy `/storage`, or a real S3 provider).
+- **TOFU host-key trust and the missing GitHub Environment approval gate**, both noted in 28A3, are unchanged — unrelated to Nginx but still open.
+- **This entire design is unvalidated against the real VPS**, by explicit instruction — `nginx -t` and the routing/header behavior were proven genuinely, but against stand-ins (Docker containers), not `194.31.55.106` itself.
+- **Certificate renewal automation isn't set up yet** — Certbot's installed package typically registers a systemd timer/cron job automatically, but this session didn't verify that on the real VPS (couldn't — no VPS access). Worth an explicit check as part of the manual steps below (`certbot renew --dry-run`).
+
+## Exact manual VPS commands (Stage 28A4 — nothing above has been run against `194.31.55.106`)
+
+Run as a user with `sudo` (the `devops` deploy user, or root). None of this has been executed by this session, per instruction.
+
+**1. Install nginx and certbot, if not already present:**
+```bash
+sudo apt update
+sudo apt install -y nginx certbot
+sudo mkdir -p /var/www/certbot
+```
+
+**2. Copy the bootstrap (HTTP-only) config to the VPS** (from your local checkout, adjust the source path as needed):
+```bash
+scp -P 22122 deploy/nginx/compserv.cloud.pre-cert.conf devops@194.31.55.106:/tmp/compserv.cloud.conf
+ssh -p 22122 devops@194.31.55.106 "sudo mv /tmp/compserv.cloud.conf /etc/nginx/sites-available/compserv.cloud.conf"
+```
+
+**3. Enable the site and remove the default one (if present and still listening on 80):**
+```bash
+ssh -p 22122 devops@194.31.55.106 "sudo ln -sf /etc/nginx/sites-available/compserv.cloud.conf /etc/nginx/sites-enabled/compserv.cloud.conf && sudo rm -f /etc/nginx/sites-enabled/default"
+```
+
+**4. Test and reload:**
+```bash
+ssh -p 22122 devops@194.31.55.106 "sudo nginx -t && sudo systemctl reload nginx"
+```
+(If nginx isn't running yet: `sudo systemctl enable --now nginx` instead of `reload`.)
+
+**5. Confirm DNS actually points `compserv.cloud` (and `www.compserv.cloud`, if used) at `194.31.55.106` before requesting a certificate** — Certbot's HTTP-01 challenge will fail otherwise:
+```bash
+dig +short compserv.cloud
+dig +short www.compserv.cloud
+```
+
+**6. Obtain the certificate** (webroot method — does not touch the Nginx config itself):
+```bash
+ssh -p 22122 devops@194.31.55.106 \
+  "sudo certbot certonly --webroot -w /var/www/certbot -d compserv.cloud -d www.compserv.cloud"
+```
+(Drop `-d www.compserv.cloud` if that subdomain isn't actually in use/pointed at this server.)
+
+**7. Install the final config (HTTP→HTTPS redirect + HTTPS serving):**
+```bash
+scp -P 22122 deploy/nginx/compserv.cloud.conf devops@194.31.55.106:/tmp/compserv.cloud.conf
+ssh -p 22122 devops@194.31.55.106 "sudo mv /tmp/compserv.cloud.conf /etc/nginx/sites-available/compserv.cloud.conf && sudo nginx -t && sudo systemctl reload nginx"
+```
+
+**8. Restrict the application ports to localhost** (requires the `docker-compose.prod.yml` change from this session to already be on the VPS, i.e. after the next `deploy.yml` run — or apply manually now):
+```bash
+ssh -p 22122 devops@194.31.55.106 \
+  "cd /opt/lms && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend frontend"
+```
+
+**9. Final verification:**
+```bash
+curl -I https://compserv.cloud/
+curl -s https://compserv.cloud/api/v1/health
+curl -I http://compserv.cloud/          # expect a 301 to https://
+ssh -p 22122 devops@194.31.55.106 "sudo certbot renew --dry-run"   # confirms auto-renewal is wired up
+```
+
+**10. Update the two `NEXT_PUBLIC_API_URL` locations identified above**, separately from everything else here:
+- GitHub → repo Settings → Secrets and variables → Actions → Variables → `PROD_NEXT_PUBLIC_API_URL` → confirm/set to `https://compserv.cloud/api`, then manually dispatch **Publish Production Images** (or push a commit) to rebuild the frontend image with the correct baked-in client URL, then let **Deploy to Production** run to actually roll it out.
+- The VPS's `/opt/lms/.env` — confirm `NEXT_PUBLIC_API_URL=https://compserv.cloud/api` (already reflected in this repo's `.env.production.example`, but the *live* file needs the same edit made by hand, since `deploy.yml` never touches this file directly per 28A3's design).
+
 ## Remaining for Stage 28 (not started)
 
 28A2 covered the Dockerfile-hardening work 28A1 anticipated as its own session together with the GHCR build/publish workflow (confirmed live, see the post-session update above). 28A3 (this session) built the actual VPS deploy workflow and production compose override — designed, built, and validated as thoroughly as possible without a real server, but never executed against one. What's left:

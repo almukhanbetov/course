@@ -15,13 +15,29 @@ services:
   # which would be ambiguous about whether `docker compose up` should ever
   # attempt a local build) — Compose's merge-reset tag, supported since
   # Compose CLI v2.24.0.
+  # Bound to 127.0.0.1 only, not the base file's implicit 0.0.0.0 — now that
+  # Stage 28A4 puts host-level Nginx in front (listening on 80/443 for
+  # everyone), the raw application ports have no reason to stay reachable
+  # from outside the VPS at all; Nginx reaches them over localhost, exactly
+  # like it reaches nothing else directly. `!override` replaces the whole
+  # `ports:` list rather than appending to it — Compose's default merge
+  # behavior for list-type fields (like `ports`) is to concatenate, not
+  # replace, the same class of surprise already caught once this session
+  # with `depends_on` (a map) — left as plain (unmarked) merging, the base
+  # file's public 0.0.0.0 binding would still be present *alongside* this
+  # one, defeating the point entirely. Verified by resolving the actual
+  # merged config, not assumed.
   backend:
     build: !reset null
     image: ${IMAGE_REGISTRY}/course-backend:${IMAGE_TAG}
+    ports: !override
+      - "127.0.0.1:${BACKEND_PORT}:8080"
 
   frontend:
     build: !reset null
     image: ${IMAGE_REGISTRY}/course-frontend:${IMAGE_TAG}
+    ports: !override
+      - "127.0.0.1:${FRONTEND_PORT}:3000"
     # NEXT_PUBLIC_API_URL is already baked into this image at build time by
     # image-publish.yml (see that workflow's build-args) — nothing to
     # override here; the ARG only matters at image-build time, which never
