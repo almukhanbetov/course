@@ -1,0 +1,80 @@
+name: Production Database Backup
+
+# Stage 30A1. Runs on a schedule, and can also be triggered manually for
+# testing. Reuses deploy.yml's exact SSH secrets and connection pattern —
+# no new credentials for connectivity, only one new value that lives
+# entirely on the VPS itself (BACKUP_ENCRYPTION_PASSPHRASE, never touched
+# by this workflow — see deploy/backup/run-backup.sh).
+#
+# A failed run here is this stage's own answer to "Stage 29, to detect a
+# failed backup job" (per STAGE30_PROGRESS.md's own design note): a red run
+# in the Actions tab, not a new health-check component — deliberately, to
+# avoid a migration Stage 30's own roadmap text says isn't needed.
+"on":
+  schedule:
+    # 03:00 UTC daily — a plausible low-traffic window; revisit once real
+    # production traffic patterns are known.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_DIR: /opt/lms
+      SSH_HOST: ${{ secrets.PROD_VPS_HOST }}
+      SSH_USER: ${{ secrets.PROD_VPS_USER }}
+      SSH_PORT: ${{ secrets.PROD_VPS_SSH_PORT }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Fails closed before any SSH/network activity — same philosophy as
+      # deploy.yml's own equivalent step.
+      - name: Verify required secrets are present
+        run: |
+          missing=()
+          [ -z "$SSH_HOST" ] && missing+=(PROD_VPS_HOST)
+          [ -z "$SSH_USER" ] && missing+=(PROD_VPS_USER)
+          [ -z "$SSH_PORT" ] && missing+=(PROD_VPS_SSH_PORT)
+          [ -z "${{ secrets.PROD_VPS_SSH_PRIVATE_KEY }}" ] && missing+=(PROD_VPS_SSH_PRIVATE_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+          echo "Required secrets present."
+
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.PROD_VPS_SSH_PRIVATE_KEY }}
+
+      # TOFU, same trade-off as deploy.yml — see that workflow's own
+      # comment and STAGE28_PROGRESS.md's known limitations.
+      - name: Trust the VPS host key (TOFU)
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Verify SSH connectivity
+        run: ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "echo connected"
+
+      - name: Sync backup script to the VPS
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_DIR/backup'"
+          rsync -az -e "ssh -p $SSH_PORT" \
+            deploy/backup/run-backup.sh \
+            "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/backup/run-backup.sh"
+
+      # The script itself fails closed at every stage (missing config,
+      # pg_dump failure, encryption failure, upload failure, or an
+      # unverifiable/empty uploaded artifact) — a non-zero exit here is
+      # exactly what should turn this whole run red.
+      - name: Run backup
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_DIR' && DEPLOY_DIR='$DEPLOY_DIR' bash backup/run-backup.sh"
