@@ -63,12 +63,13 @@ jobs:
       - name: Verify SSH connectivity
         run: ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "echo connected"
 
-      - name: Sync backup script to the VPS
+      - name: Sync backup scripts to the VPS
         run: |
           ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_DIR/backup'"
           rsync -az -e "ssh -p $SSH_PORT" \
             deploy/backup/run-backup.sh \
-            "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/backup/run-backup.sh"
+            deploy/backup/retention.sh \
+            "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/backup/"
 
       # The script itself fails closed at every stage (missing config,
       # pg_dump failure, encryption failure, upload failure, or an

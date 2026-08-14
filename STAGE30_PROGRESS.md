@@ -219,3 +219,61 @@ Fixed in `deploy/backup/run-backup.sh` by replacing the bash `source` with a lin
 
 - **30A3:** Retention policy (with a dry-run step before real deletion) + a runbook reflecting the exact commands this session proved work end-to-end.
 - Set `BACKUP_ENCRYPTION_PASSPHRASE` on the real production VPS's `.env` by hand when that VPS exists/is reachable (still not done — out of scope for a local sandbox session).
+
+---
+
+## Stage 30A3 — Retention policy + tested runbook (implemented)
+
+Scope: implement and prove a backup retention policy, write the operational runbook the roadmap's own text calls for, and prove that runbook by following it once end-to-end. No 30B1 (security sweep), no application code, no restore into production.
+
+### Retention policy
+
+- **Keep the newest 14 daily backups, delete anything older.** Backups run nightly (`backup.yml`'s `0 3 * * *` cron), so 14 is a two-week recovery window — long enough to notice and recover from a slow-burning problem (a bad migration, silent data corruption) that isn't caught same-day, while bounding storage growth on a single-VPS production setup that has no independent disk-usage alert of its own (Stage 29's observability doesn't include one). Configurable per-environment via `RETENTION_KEEP_COUNT` in `.env` (optional — defaults to 14, not a required value the pre-flight check demands).
+- **Scope of what can ever be deleted, two independent layers:** (1) the `mc ls`/`mc rm` calls are hard-scoped to the `backups/` prefix of the existing bucket only — nothing else in the bucket (e.g. lesson video assets) is ever listed as a candidate; (2) within that prefix, only object names exactly matching `lms-backup-<UTC timestamp>.dump.enc` (this mechanism's own naming convention) are treated as backups at all — anything else under `backups/` is reported (`NOTE - ignoring unrecognized object...`) but never touched, so an operator notices unexpected content instead of it silently surviving *or* silently being swept up.
+- **The newest backup is structurally never a deletion candidate** — recognized names sort lexicographically in chronological order (fixed-width, zero-padded timestamp), and the split point is always "delete the oldest `total - keep_count`, keep the newest `keep_count`" — the newest entry is by construction always inside the kept set whenever `keep_count >= 1` (enforced: the script refuses a `RETENTION_KEEP_COUNT` of 0 or non-numeric). A second, redundant assertion inside the deletion loop (`if [ "$NAME" = "$NEWEST_NAME" ]; then ... exit 1; fi`) exists purely as insurance against a future edit to that loop, not because the current logic can reach it.
+- **Fail closed at both read and write:** a listing failure aborts immediately with zero deletions attempted (an unreadable bucket must never be interpreted as "nothing exists, nothing to keep" — the opposite of safe); a deletion failure mid-loop stops immediately rather than continuing past it — anything already deleted in that run stays deleted (correct, it was genuinely eligible), anything not yet reached is left alone (the safe default), and the run exits non-zero either way.
+- **Dry-run mode** (`DRY_RUN=true`) reports exactly what would be deleted with zero real deletions — usable standalone before ever changing `RETENTION_KEEP_COUNT` for real, and was the actual first step of this session's own retention testing (see below), not just a theoretical mode.
+- **Runs automatically after every successful backup**, invoked as the final step of `run-backup.sh` (never runs against a bucket whose "newest" entry might be today's own partial/failed upload, since it only runs after that upload is independently verified). A retention *failure* does not retroactively mark the backup as lost — the dump is already durably uploaded and verified by that point — but it does turn the overall CI run red, matching this project's existing "a red run is the failure signal" design rather than adding a new health-check component.
+
+### Runbook
+
+New `docs/RESTORE_RUNBOOK.md` — the roadmap's own explicit "written, tested restore runbook" requirement. Nine sections: manual backup, verify a backup exists, download+decrypt, restore into an isolated Postgres (with an explicit warning never to point restore at the running `postgres` service), integrity verification, retention (automatic + manual/dry-run), what to do if decryption fails, what to do if the artifact is corrupted, and cleanup. Every command in it is a command this session (or 30A2) actually ran, not a theoretical procedure.
+
+### Bug found and fixed while writing/following the runbook: same `.env`-sourcing flaw, in the runbook's own commands
+
+The runbook's first draft of §2 loaded `.env` the same broken way 30A2 found and fixed *inside* the scripts (`set -a; . <(...) ; set +a`) — a bash `source` of a file containing `SMTP_FROM_NAME=LMS Platform` (valid docker-compose syntax, invalid bash syntax). Running it live (as instruction 9 requires — follow the runbook, don't just read it) reproduced the exact `Platform: command not found` error, non-fatally this time only because the needed `S3_*` variables happen to appear earlier in `.env` than `SMTP_FROM_NAME` — a fragile accident, not a guarantee. Fixed by replacing that line in the runbook with the same line-by-line `KEY=VALUE` parser `run-backup.sh`/`retention.sh` already use, with a comment explaining why. This is exactly the kind of gap "follow it once, don't just write it" is supposed to catch.
+
+### Files changed
+
+- `deploy/backup/retention.sh` (new) — the retention script.
+- `deploy/backup/run-backup.sh` (modified) — calls `retention.sh` as its final step after a verified successful backup.
+- `.github/workflows/backup.yml` (modified) — syncs `retention.sh` to the VPS alongside `run-backup.sh` (same `$DEPLOY_DIR/backup/` destination).
+- `docs/RESTORE_RUNBOOK.md` (new) — the operational runbook.
+- `STAGE30_PROGRESS.md` (this section).
+
+### Verification performed
+
+All against the live dev stack (`course-postgres-1`/`course-minio-1`, the same "closest available real analog to production" stance 30A2 took — no VPS is reachable from this sandbox) and controlled, clearly-fake test artifacts uploaded specifically for retention testing — never against anything that could be mistaken for a real backup, and the two real backup artifacts already in the bucket (30A2's and one produced fresh by this session's own runbook walkthrough) were deliberately protected as "never touch these" throughout.
+
+- **Runbook followed once, live, end-to-end (instruction 9):** §1 manual backup (a fresh real backup, `lms-backup-20260814T135621Z.dump.enc`, 123952 bytes — also exercising retention's new auto-invocation, which correctly found 2 backups ≤ the default keep count of 14 and deleted nothing) → §2 independent existence verification (`mc stat --json`, `mc ls`) → §3 download + decrypt (`file` confirmed a genuine `PostgreSQL custom database dump`) → §4 restore into a brand-new, isolated `postgres:17-alpine` container (`restore-verify`, default bridge network, own volume, exit code 0) → §5 integrity verification (schema: 43/43 tables identical; row counts: identical across all 43 tables; a real 3-table join returned correct grouped results) → §9 cleanup (container removed, scratch files deleted). Every command copy-pasted from the runbook document itself, not re-derived from memory.
+- **Retention: keep-newest-N, live, with controlled fixtures (instruction 10):** uploaded 12 synthetic fake "old" backups (`lms-backup-20260101T000000Z.dump.enc` … `...0112...`, fabricated January timestamps, tiny dummy content) alongside the 2 real backups already present (14 recognized total). `DRY_RUN=true RETENTION_KEEP_COUNT=5` correctly identified exactly the 9 oldest (all fake) as deletable, correctly named the true newest (this session's real backup) as the one never a candidate, and deleted nothing (bucket object count unchanged after, verified by a separate listing). The real (non-dry-run) run with the same `RETENTION_KEEP_COUNT=5` then deleted exactly those same 9, leaving exactly 5 recognized backups — the 3 newest fakes plus **both real backups**, confirming the roadmap's own "never delete the newest valid backup" in a live run, not just by code inspection.
+- **Prefix/pattern safety, live (instruction 5):** two decoys were planted before the real run above — one *inside* `backups/` with a non-matching filename (`decoy-not-a-backup.txt`), one entirely *outside* the `backups/` prefix (`not-backups-prefix/decoy.txt`). Both survived every retention run untouched; the in-prefix decoy was explicitly logged as an ignored "unrecognized object," not silently skipped.
+- **Fail-closed on listing failure, live (instruction 6):** ran `retention.sh` against the real bucket with a deliberately wrong `S3_SECRET_KEY` (temporarily edited into a scratch copy of `.env`, restored immediately after) — result: `retention: listing backups failed - aborting, no deletions attempted`, exit code 1, and a follow-up listing (with correct credentials) confirmed the bucket's object count was genuinely unchanged, not just that the script claimed so.
+- **Deletion-failure fail-closed, live spot-check:** directly exercised `mc rm` against a target guaranteed to fail (a nonexistent bucket) to confirm `mc`'s own exit-code contract (`exit 1` on a real removal failure, not a silent 0) — the same contract `retention.sh`'s `if ! docker run ... rm ...; then exit 1; fi` loop depends on to abort correctly mid-run; the loop's own logic was additionally re-verified by code review, not live fault-injected against the loop itself (a genuine mid-loop deletion failure against a live, otherwise-healthy MinIO is not straightforward to induce safely).
+- **Cleanup (own test fixtures):** all remaining synthetic test backups and both decoys removed after the fixture-based tests above; final bucket state independently re-listed and confirmed to contain exactly the two legitimate real backups (30A2's original plus this session's runbook-walkthrough one) — nothing else.
+- **Validation:** `bash -n` on both `run-backup.sh` and `retention.sh`; `python3 -c "yaml.safe_load(...)"` structural check and `actionlint` (zero findings) on `backup.yml`.
+- **Dev stack integrity:** every `course-*` container confirmed running/healthy, unaffected, before and after every step above; `.env` returned to its exact pre-session state (the test `BACKUP_ENCRYPTION_PASSPHRASE` added for this session's runbook walkthrough was removed afterward — gitignored, never committed either way).
+
+### Not done this session
+
+- **No production database write** — `run-backup.sh`'s `pg_dump` step is read-only; every restore in this session (runbook walkthrough) targeted a brand-new isolated container, never `course-postgres-1`.
+- **No real VPS contact** — `retention.sh` has not run against the real production VPS/bucket; `BACKUP_ENCRYPTION_PASSPHRASE` still has not been set there (unchanged from 30A2's own note).
+- **No application code touched.**
+- **30B1 (security sweep) not started**, per instruction.
+
+### Remaining work — 30B1, 30B2, 30B3
+
+- **30B1 — Security-focused sweep:** auth hardening still holds across endpoints added since Stage 26; systematic IDOR check across every domain's ownership boundaries; payment-provider-as-source-of-truth confirmation; video delivery presigned-URL scoping/expiry. Not started, not touched by this session (this session's only touch on `internal/*` domains was read-only `pg_dump`/`pg_restore` at the whole-database level — no endpoint, handler, or ownership-check code was read or reasoned about here).
+- **30B2 — Full-platform functional regression:** enrollment, learning progress, payments, certificates, Q&A, search, recommendations, admin/instructor dashboards — the exact gap `STAGE20_PROGRESS.md` has named since Stage 20. Not started.
+- **30B3 — Fixes + final Stage 30 report + Stages 21–30 completion statement:** depends entirely on what 30B1/30B2 find; not started, nothing to fix yet.
+- **Operationally outstanding regardless of 30B progress:** `BACKUP_ENCRYPTION_PASSPHRASE` still needs to be set by hand on the real production VPS's `.env` before the schedule in `backup.yml` has any real effect there — true since 30A1, still true now.

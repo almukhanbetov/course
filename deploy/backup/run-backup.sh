@@ -175,3 +175,19 @@ if [ -z "$UPLOADED_SIZE" ] || [ "$UPLOADED_SIZE" -eq 0 ]; then
 fi
 
 echo "backup: SUCCESS - ${BACKUP_OBJECT_KEY} (${UPLOADED_SIZE} bytes)"
+
+echo "backup: running retention policy"
+
+# Stage 30A3. Runs only after today's backup is independently confirmed
+# uploaded and non-empty above - retention never runs against a bucket
+# whose newest entry might actually be a failed/partial upload from this
+# same invocation. A retention failure here does NOT mean today's backup
+# was lost - the dump above is already durably uploaded and verified - it
+# means old backups weren't pruned and needs investigating (see
+# docs/RESTORE_RUNBOOK.md). It still turns this run red so that's actually
+# noticed, matching this project's "a red CI run is the failure signal"
+# design (see .github/workflows/backup.yml's own comment).
+if ! DEPLOY_DIR="$DEPLOY_DIR" bash "$(dirname "$0")/retention.sh"; then
+  echo "backup: retention step failed - today's backup above is safe and unaffected; old backups were not pruned, investigate deploy/backup/retention.sh directly" >&2
+  exit 1
+fi
