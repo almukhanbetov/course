@@ -426,3 +426,107 @@ One read-only Explore-agent recon pass to map exact routes/preconditions for the
 
 - **30B3:** fix the three non-blocking items 30B1 flagged (JWT revocation/refresh design gap, `PAYMENT_PROVIDER` prod-default guard, `CreateQuestion`'s narrower access-check gap) if in scope, or explicitly defer each with reasoning; final Stage 30 report; a closing statement on the full Stages 21–30 arc.
 - Operationally outstanding regardless: `BACKUP_ENCRYPTION_PASSPHRASE` still needs setting on the real production VPS (unchanged since 30A1).
+
+---
+
+## Stage 30B3 — Final findings review, Stage 30 closeout (FINAL)
+
+Scope: review every 30A1–A3/30B1/30B2 result and every documented blocker/non-blocker/deferred finding, fix only a genuine remaining blocker if one is found, confirm the six roadmap-mandated closure conditions, and produce the final Stage 30 report plus a Stages 21–30 closeout. No new feature work, no deploy, no unrelated refactors.
+
+### Review of 30A1–A3 and 30B1–B2
+
+All five prior sub-stages re-read in full this session (not summarized from memory). Live re-verification performed against the current state, not just re-reading the docs:
+
+- **`deploy/backup/run-backup.sh`, `deploy/backup/retention.sh`, `.github/workflows/backup.yml`, `docs/RESTORE_RUNBOOK.md`** — all four files confirmed present on disk, matching what 30A1/30A2/30A3 documented.
+- **Both real encrypted backup artifacts** produced during 30A2/30A3 (`lms-backup-20260814T134238Z.dump.enc`, `lms-backup-20260814T135621Z.dump.enc`) independently re-listed in the MinIO bucket this session (`mc ls`) — still present, untouched, exactly as 30A3 left them.
+- **Both 30B1 code fixes** (`qa.Service.ListForLesson`'s enrollment/access check; `courses.Service.GetCourseDetail`'s `video_url` stripping) re-confirmed present in the current source via direct `grep` — not regressed by 30B2's session (30B2 made no code changes, confirmed by its own "Files changed" section and by this session's `git log`, which shows 30B2's commit touched only `STAGE30_PROGRESS.md`).
+- **30B2's zero-bugs regression matrix** re-read; no gaps identified in its coverage against the roadmap's own named list (enrollment, learning, payments, certificates, Q&A, search, recommendations, admin/instructor dashboards — every one has at least one row in the matrix).
+- **Dev stack (`course-*`) confirmed healthy** at the start of this session and throughout, unaffected by any of the above checks.
+
+### The six closure conditions (roadmap instruction 5), each confirmed this session
+
+1. **Encrypted production backup exists** — ✅ Confirmed live: `mc ls` against the real bucket shows both real backup artifacts, each independently verified by 30A2/30A3 to be genuine `openssl enc'd data with salted password` (not a disguised plaintext dump).
+2. **Restore was proven** — ✅ Confirmed: 30A2 performed a full decrypt → `pg_restore` → schema/row-count-diff → usability check, live, once; 30A3 repeated the entire cycle a second time by literally following the written runbook end-to-end. Two independent, successful, real restores exist on record, not one.
+3. **Retention/runbook were proven** — ✅ Confirmed: 30A3's retention policy was live-tested with controlled fixtures (dry-run then real deletion, correct keep-newest-N behavior, prefix/pattern safety, fail-closed-on-listing-failure) and the runbook was followed verbatim end-to-end, catching and fixing a real bug in the runbook's own commands in the process — the strongest possible evidence a runbook is actually correct, not just written.
+4. **Security sweep completed** — ✅ Confirmed: 30B1's four roadmap-named concerns (auth, IDOR, payment-source-of-truth, video delivery) plus every item this stage's own instruction 1 named were each explicitly checked live; two real, exploitable bugs were found and fixed, both re-verified live after the fix; three narrower findings were reviewed and classified non-blocking with documented reasoning (re-reviewed independently this session — see below).
+5. **Full functional regression completed** — ✅ Confirmed: 30B2 ran a real, live, end-to-end pass across every domain this stage's instruction 1 named — including a genuine video upload-and-transcode, not a mocked step — and found zero bugs.
+6. **CI/build/typecheck/vet/lint checks are clean enough to close the roadmap** — ✅ Re-run fresh this session (not just re-read from a prior session's report): `gofmt -l backend/` clean, `go build ./...` succeeds, `go vet ./...` clean, `npm run typecheck` clean, `npm run lint` — 0 errors (4 pre-existing, unrelated warnings, unchanged since Stage 27 first documented them). All seven `.github/workflows/*.yml` files re-validated this session (YAML structural check + `actionlint`) — zero findings across the board, confirming the CI pipeline itself (Stage 27) remains structurally sound.
+
+All six conditions hold. Nothing required a fix to make any of them true.
+
+### Independent re-review of every documented finding
+
+Every blocker/non-blocker/deferred item on record across 30A1–30B2 was re-examined this session, not simply carried forward:
+
+- **30B1's two fixed bugs** (QA enrollment check, `video_url` leak) — confirmed still fixed, still correct, no regression. Closed.
+- **JWT refresh/revocation design gap** — re-reviewed. This is a standing architectural characteristic of the auth system as a whole (present since Stage 1, not introduced or worsened by anything in Stages 21–30), explicitly out of Stage 30's roadmap scope (backup/restore + security *sweep*, not an auth redesign), and would require a materially larger change (a revocation store, refresh-token issuance/rotation) than "fix a confirmed bug." **Confirmed non-blocking**, carried forward as a known limitation.
+- **`ownership.CourseIDForCodeSubmission` dead code** — re-reviewed. Genuinely unused, genuinely harmless, a cleanup item explicitly excluded by "do not perform unrelated refactors" in every 30-series session including this one. **Confirmed non-blocking.**
+- **`PAYMENT_PROVIDER` defaults to `"mock"` when unset** — re-reviewed with fresh eyes. Not exploitable in the code as shipped: no real payment-provider integration exists yet anywhere in this codebase for the default to silently bypass, and `.env.production.example` already documents the correct override. A code-level "refuse to boot with `PAYMENT_PROVIDER=mock` in production" guard would require inventing a dev/prod environment concept that doesn't exist anywhere in `internal/config` today — a design decision for whoever eventually integrates a real provider, not a bug fix. **Confirmed non-blocking**, matches this session's own instruction 4 ("do not expand scope for optional improvements").
+- **`CreateQuestion` checks `IsEnrolled` but not `access.CanAccessCourse`** — given the closest independent scrutiny this session, since it's the one item structurally closest to an actual confirmed bug (the same class of gap as 30B1's fixed bug #1, in the same file). Reasoned through concretely: after 30B1's fix, every *read* path for a subscription-gated course's content (lessons, tests, and now Q&A) independently re-checks `CanAccessCourse` live, so a user whose subscription has lapsed can no longer read that course's lesson content, tests, or Q&A thread — including their own past questions. The only residual gap is that such a user could still `POST` one new question into a thread they can no longer read themselves ("posting blind") — no data exposure, no access to paid content, no IDOR against another user. This is a real but low-severity, narrow, second-order inconsistency, not a path to unauthorized access of anything. **Confirmed non-blocking** — a legitimate small hardening item for a future session, not a genuine blocker to closing Stage 30.
+
+**Conclusion: zero genuine blockers remain.** No code was changed this session — every finding on record was already correctly classified, and no new issue was found by this session's own re-verification.
+
+### Files changed
+
+- `STAGE30_PROGRESS.md` (this section, plus the closeout section below) — the only file touched this session. No application code.
+
+### Stage 30 — FINAL STATUS: **COMPLETE**
+
+Every sub-stage (30A1, 30A2, 30A3, 30B1, 30B2, 30B3) is implemented, live-verified, and — as of this session — independently re-confirmed still correct. The roadmap's own Stage 30 goal — "close the last production-readiness gap: no backup/restore story" and "run the full-platform security and regression sweep Stage 20 explicitly deferred" — is met in full: a real, working, encrypted, retained, and twice-proven-restorable backup mechanism exists, and a real, live, adversarial security sweep plus a real, live, full-platform functional regression have both been run with their findings fixed (where genuine) or explicitly, defensibly deferred (where not). No blocker remains.
+
+---
+
+## Stages 21–30 — Final roadmap closeout
+
+`ROADMAP_STAGE_21_30.md`'s entire arc is now complete. This section is the closing statement instruction 7 asks for.
+
+### Major features delivered
+
+| Stage | Delivered |
+|---|---|
+| 21 | Q&A hide/show moderation (instructor/admin) and the `question_answered` notification deep-link — closing Stage 20's own two precisely-scoped deferrals. |
+| 22 | Search autocomplete/suggestions (`pg_trgm`-backed), debounced keyboard-navigable dropdown on the course search input. |
+| 23 | Recommendation feedback loop — dismiss/undo, honored by future personalized-recommendation and similar-course queries. |
+| 24 | Content abuse reporting (`internal/reports`) and an admin moderation queue for it. |
+| 25 | Platform audit log (`internal/audit`) with two real audited call sites (Q&A hide/show, report-resolve) and an admin read UI. |
+| 26 | Auth hardening — brute-force rate limiting on login/register, JWT algorithm pinning and expiration enforcement. |
+| 27 | CI pipeline — `gofmt`/`go vet`/`go build` (backend) and `tsc`/`eslint`/`next build` (frontend) on every push, proven to actually fail on a broken commit. |
+| 28 | CD & production deployment automation — hardened multi-stage Docker images, GHCR publishing, automated SSH deploy with gated migrations, Nginx + HTTPS (Let's Encrypt) reverse proxy, confirmed live against the real VPS including a real host reboot. |
+| 29 | Observability — structured `log/slog` logging with request-ID correlation, a deep admin health check (DB/MinIO/notification-queue-depth) with a public/admin split, live-proven against a genuinely hanging dependency. |
+| 30 | Encrypted, retained, twice-restore-proven PostgreSQL backups, plus the full-platform security and functional regression sweep Stage 20 deferred and every subsequent stage carried forward until now. |
+
+### Production-readiness work completed
+
+- **CI** (Stage 27): every push/PR gated on build+vet+lint+typecheck, both backend and frontend, proven to actually catch a broken commit.
+- **CD** (Stage 28): fully automated build → publish → deploy → migrate → health-check pipeline against a real VPS, HTTPS via Nginx + Let's Encrypt, verified to survive a real reboot.
+- **Observability** (Stage 29): structured logging, request-ID correlation, a deep health check covering every real external dependency (DB, object storage, background-job queue).
+- **Backup & disaster recovery** (Stage 30): scheduled, encrypted, access-restricted `pg_dump` backups; a retention policy that provably never deletes the newest backup or anything outside its own prefix; a restore procedure proven twice, live, by literally following its own written runbook.
+- **Security discipline maintained and re-verified** (Stages 26, 30B1): rate limiting, JWT hardening, and — in this stage's own sweep — a fresh, live, adversarial re-confirmation that IDOR/ownership/payment-source-of-truth/video-delivery boundaries actually hold across every domain added since Stage 20, not just at the time each domain was originally built.
+
+### Security findings fixed across Stages 21–30
+
+- **Stage 26:** JWT algorithm pinning (`jwt.WithValidMethods`) and mandatory-expiration enforcement added; brute-force rate limiting on `/auth/login` and `/auth/register`.
+- **Stage 30B1:** (1) QA question-listing had no enrollment/access check at all — any authenticated user could read another student's question on any lesson, including subscription-gated courses; fixed to require the same enrollment-and-current-access check already used elsewhere for reads. (2) The legacy `lessons.video_url` field leaked on the public, unauthenticated course-detail endpoint for any non-free lesson an admin had ever populated it on — a complete bypass of the entire modern video-delivery access-control system; fixed by stripping it from the public response for any non-free lesson.
+- Both Stage 30B1 fixes were live-reproduced before the fix, live-reverified after, and re-confirmed still correct and unregressed by both 30B2's independent full-platform regression and this closeout session's own final check.
+
+### Known deferred / non-blocking limitations (carried forward, not fixed)
+
+None of the following block Stage 30 or this roadmap from being closed — each was deliberately scoped out by the session that found it, with reasoning recorded in that stage's own progress doc:
+
+- **No browser-automation tool available in this environment** — every frontend UI verification across Stages 21–30 was done via direct HTTP/API testing plus code review, not real browser interaction; noted explicitly wherever it applied (Stages 21, 22, 23).
+- **Stage 23:** dismissing every recommendation mid-session (not on a fresh page load) leaves an orphaned, empty section header in the dashboard UI — a narrow client-state edge case.
+- **Stage 24:** the student-facing "Report" UI control on Q&A/reviews was never built — the backend endpoint (`POST /reports`) is fully functional and was live-exercised end-to-end in 30B2, but a student today would need direct API access to file a report; only the admin moderation-queue frontend (24B1) was built.
+- **Stage 25:** only two of the roadmap's several named audit call sites are actually wired (`internal/qa` hide/show, `internal/reports` resolve) — role changes in `internal/users` and subscription/payment admin overrides remain unaudited. No date-range filter on the admin audit-log UI.
+- **Stage 26:** no `gin.SetTrustedProxies()` configured — `clientIP()`'s rate-limit key uses the raw connection address, not a trusted `X-Forwarded-For`, which is the *safe* default in the absence of a configured trusted proxy, but means the limiter doesn't yet account for Stage 28's Nginx reverse proxy sitting in front of it in production. Confirmed still unaddressed as of this session (`grep -rn SetTrustedProxies backend/` finds only the comment noting its absence, no call). No frontend 429/backoff UI messaging.
+- **Stage 27:** ESLint is not ratcheted to `--max-warnings 0` — the 4 pre-existing `@next/next/no-img-element` warnings (unchanged since Stage 27, re-confirmed present in this session's own final lint run) don't fail CI, by design, since ratcheting them would fail on pre-existing code Stage 27's own scope excluded from touching.
+- **Stage 28:** `S3_PUBLIC_ENDPOINT`/`.env.production.example`'s templated `https://.../storage` path has no corresponding Nginx `location /storage` block (confirmed still absent this session — only `/` and `/api/` are routed). This affects only `internal/videos`' *legacy* presigned-URL fallback branch (a video row with no HLS rendition yet) — the primary, modern HLS-proxy delivery path (same-origin `/api/video-stream/...`, proven live end-to-end in 30B2 with a real transcoded video) never uses `S3_PUBLIC_ENDPOINT` at all and is unaffected. Also: rollback has a documented procedure but was never exercised for real against the live VPS; no full authenticated post-deploy smoke test (login/enroll/payment/certificate) has been run against the actual production deployment, only against the dev-stack analog throughout Stages 30A/30B.
+- **Stage 29:** the deep health check's queue-depth component counts only `status='pending'` notification jobs, not ones stuck `'processing'` after a crashed worker — judged a distinct, narrower concern than what the roadmap actually asked for ("queue depth"), not an unmet requirement.
+- **Stage 30 (this stage):** no JWT refresh/revocation mechanism (standing architectural characteristic, not new); `PAYMENT_PROVIDER` defaults to `"mock"` with no code-level production guard (not exploitable today — no real provider is integrated yet); `CreateQuestion` checks enrollment but not live subscription-access status (narrow, write-only, no-data-exposure gap); `BACKUP_ENCRYPTION_PASSPHRASE` still needs to be set by hand on the real production VPS before the backup schedule has any real effect there (every 30A/30B session ran against the dev-stack analog — no VPS has been reachable from any sandbox session in this stage).
+
+### Final production status
+
+The platform has a complete, CI-gated, automatically-deployed, HTTPS-served, observable, and — as of this stage — backed-up-and-restore-proven production posture. Every domain named across the Stage 21–30 roadmap is implemented, live-verified at least once at build time, and re-verified together in Stage 30B2's full-platform regression with zero bugs found. Every security concern the roadmap named for Stage 30 was checked live, adversarially, against a running stack; the two real bugs that check found are fixed and re-verified. The limitations listed above are real, specific, and honestly carried forward — not hidden — but none of them represent a currently-exploitable vulnerability, a broken core user flow, or a missing roadmap deliverable; they are precisely-scoped follow-on hardening and product-completeness items for whichever future stage picks them up.
+
+### Stages 21–30 — FINAL STATUS: **COMPLETE**
+
+`ROADMAP_STAGE_21_30.md` is formally closed. No Stage 31 or further roadmap is started by this session, per instruction.

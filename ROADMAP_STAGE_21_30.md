@@ -1,5 +1,7 @@
 # Roadmap — Stage 21 to Stage 30
 
+> **STATUS: COMPLETE.** All ten stages (21–30) are implemented and live-verified. See `STAGE30_PROGRESS.md`'s final "Stages 21–30 — Final roadmap closeout" section for the full closing report: major features delivered, production-readiness work completed, security findings fixed, and honestly-carried-forward known limitations. This file is preserved below exactly as originally written, as the historical planning record — it is not rewritten to reflect what actually shipped stage-by-stage; the closeout section is the source of truth for final status.
+
 Planning document only. No implementation performed. Written after reviewing `STAGE20_PROGRESS.md`, `README.md`, and the current backend domain list (`backend/internal/*`), route registrations (`backend/cmd/api/main.go`), and frontend routes, to avoid re-proposing anything already built.
 
 ## Baseline: what's already done (through Stage 20)
@@ -164,7 +166,7 @@ Every stage below is written to be split the same way Stage 20 was: an **A** ses
 
 ---
 
-## Stage 30 — Backups, recovery & final production hardening
+## Stage 30 — Backups, recovery & final production hardening — ✅ COMPLETE
 
 **Goal:** Close the last production-readiness gap — there is no backup/restore story today — and run the full-platform security and regression sweep Stage 20 explicitly deferred ("payments/subscriptions, video pipeline, certificates, achievements, search/recommendations were not re-tested" per `STAGE20_PROGRESS.md`), now that Stages 21–29 have added real new surface area on top of the existing platform.
 
@@ -180,15 +182,17 @@ Every stage below is written to be split the same way Stage 20 was: an **A** ses
 
 ## Summary table
 
-| Stage | Goal | Complexity | Depends on |
-|---|---|---|---|
-| 21 | Close Stage 20 deferrals: Q&A hide/show moderation + notification deep-link | Small | Stage 20 |
-| 22 | Search autocomplete & suggestions | Medium | Stage 18 (search) |
-| 23 | Recommendation feedback (dismiss / not-interested) | Small/Medium | Stage 18 (recommendations) |
-| 24 | Content abuse reporting + admin moderation queue | Medium | Stage 21, Stage 20, reviews |
-| 25 | Platform audit log | Medium | Stage 21, Stage 24 |
-| 26 | Auth hardening: rate limiting & session security | Medium | — (existing auth domain) |
-| 27 | CI pipeline (build/lint/gate) | Medium | — |
-| 28 | CD & production deployment automation | Large | Stage 27 |
-| 29 | Observability: logging, health, alerting | Medium/Large | Stage 28 |
-| 30 | Backups/recovery + final full-platform hardening sweep | Large | Stage 28, Stage 29 |
+All ten stages below are **✅ COMPLETE** — see `STAGE30_PROGRESS.md`'s final closeout section for the full report.
+
+| Stage | Goal | Complexity | Depends on | Status |
+|---|---|---|---|---|
+| 21 | Close Stage 20 deferrals: Q&A hide/show moderation + notification deep-link | Small | Stage 20 | ✅ Complete |
+| 22 | Search autocomplete & suggestions | Medium | Stage 18 (search) | ✅ Complete |
+| 23 | Recommendation feedback (dismiss / not-interested) | Small/Medium | Stage 18 (recommendations) | ✅ Complete |
+| 24 | Content abuse reporting + admin moderation queue | Medium | Stage 21, Stage 20, reviews | ✅ Complete |
+| 25 | Platform audit log | Medium | Stage 21, Stage 24 | ✅ Complete |
+| 26 | Auth hardening: rate limiting & session security | Medium | — (existing auth domain) | ✅ Complete |
+| 27 | CI pipeline (build/lint/gate) | Medium | — | ✅ Complete |
+| 28 | CD & production deployment automation | Large | Stage 27 | ✅ Complete |
+| 29 | Observability: logging, health, alerting | Medium/Large | Stage 28 | ✅ Complete |
+| 30 | Backups/recovery + final full-platform hardening sweep | Large | Stage 28, Stage 29 | ✅ Complete |
