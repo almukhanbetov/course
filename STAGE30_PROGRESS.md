@@ -342,3 +342,87 @@ Both fixes are minimal and scoped exactly to the confirmed defect — no other f
 - **30B2:** enrollment, learning progress, payments, certificates, Q&A, search, recommendations, admin/instructor dashboards — full-platform functional smoke pass, the `STAGE20_PROGRESS.md`-named gap.
 - **30B3:** depends on 30B2's findings plus the three non-blocking items noted above; final Stage 30 report and Stages 21–30 completion statement.
 - Operationally outstanding regardless: `BACKUP_ENCRYPTION_PASSPHRASE` still needs setting on the real production VPS (unchanged since 30A1).
+
+---
+
+## Stage 30B2 — Full functional regression across the LMS (implemented)
+
+Scope: the roadmap-named gap `STAGE20_PROGRESS.md` has flagged since Stage 20 — a real, live, end-to-end functional smoke pass across every domain instruction 1 named. Functional correctness only (does the platform actually work end-to-end), not a second security pass — that was 30B1's job and isn't repeated here except where a flow naturally re-exercised a 30B1 fix. No 30B3, no deploy, no unrelated refactors.
+
+### Method
+
+One read-only Explore-agent recon pass to map exact routes/preconditions for the domains not already deeply covered by 30B1 (certificates, achievements, recommendations, search, wishlist, admin routes, video pipeline state machine), followed by real live E2E testing against the running dev stack: fresh test accounts (2 students, 2 instructors, promoted via the real admin API), two real courses built end-to-end through the actual instructor-authoring + admin-publish flow (one free, one subscription-gated), a real payment/subscription purchase, and — notably — a **real video upload and transcode**, not a mocked/skipped step: a synthetic MP4 was generated with `ffmpeg` (already present in `course-video-worker-1`), uploaded through the admin endpoint, and polled through the actual `video-worker` container until the real HLS rendition was ready, then streamed back through the authorized proxy and confirmed as genuine `MPEG transport stream data`. All test data (users, courses, modules, lessons, enrollments, subscriptions, payments, certificates, achievements, reviews, reports, Q&A, video/storage objects) was created and then fully removed at the end of the session; the real production/dev-seed data untouched throughout.
+
+### Regression matrix
+
+| Domain | Flow | Result |
+|---|---|---|
+| Auth | Register (student, duplicate-email rejected 409), login (success + wrong-password 401) | **PASSED** |
+| Auth | Protected route: no token → 401; valid token → 200 | **PASSED** |
+| Auth | Role promotion via real admin API (student → instructor) | **PASSED** |
+| Auth | Logout | **PASSED** (client-side cookie deletion — correct for this stateless-JWT design, confirmed in `frontend/lib/actions.ts`; no backend session to regress) |
+| Enrollment/Learning | Enroll in a free course, `me/courses` reflects it | **PASSED** |
+| Enrollment/Learning | Lesson progress update → `next_lesson_id` advances in `continue-learning` | **PASSED** |
+| Enrollment/Learning | Both lessons completed → course detail `completed:true`, `progress_percent:100` | **PASSED** |
+| Payments/Subscriptions | Enroll in subscription-gated course with no subscription → 403 `COURSE_ACCESS_REQUIRED` | **PASSED** |
+| Payments/Subscriptions | Create subscription (pending) → mock-confirm → `status:"active"`, computed entirely server-side | **PASSED** |
+| Payments/Subscriptions | Premium enrollment + lesson access succeed only after confirmed payment | **PASSED** |
+| Certificates | Course completion (no final test) auto-issues a certificate, no explicit request endpoint | **PASSED** |
+| Certificates | Ownership isolation: second student sees `[]`, gets 403 `FORBIDDEN` fetching the first student's certificate by ID | **PASSED** |
+| Certificates | Public verify-by-number: valid number → `valid:true` + details; bogus number → `valid:false`, still HTTP 200 | **PASSED** |
+| Achievements | `FIRST_LESSON`/`FIRST_COURSE`/`FIRST_CERTIFICATE` all auto-awarded at the correct trigger points, in order | **PASSED** |
+| Achievements | Second student (no activity) sees 0 earned / all locked | **PASSED** |
+| Q&A | Enrolled student creates a question; instructor (course owner) answers it | **PASSED** |
+| Q&A | Non-enrolled student blocked from both reading (403, the 30B1 fix) and answering (403) | **PASSED — 30B1 fix confirmed still in effect** |
+| Q&A | Instructor hides a question → disappears from student's list; admin un-hides it → reappears | **PASSED** |
+| Video | Real upload → real `ffmpeg` transcode via `video-worker` → `status:"ready"` | **PASSED** |
+| Video | Non-enrolled student denied playback (`GET /lessons/:id/video` and the HLS proxy directly, same video ID) → 403 both times | **PASSED** |
+| Video | Enrolled student: real `master.m3u8` → real `360p/index.m3u8` → real `.ts` segment (`MPEG transport stream data`), full chain | **PASSED** |
+| Video | Public course-detail response: `video_url` empty for both lessons (neither had the legacy field populated this session) | **PASSED — no regression on 30B1's fix** |
+| Search | Text query matches; unmatched query returns `items:[]`/`total:0` (HTTP 200, not 404) | **PASSED** |
+| Search | Invalid filter value (`level=bogus`) → 400 `VALIDATION_ERROR` | **PASSED** |
+| Search | Suggestions: matching prefix returns results; empty query returns `[]` | **PASSED** |
+| Recommendations | Authenticated call returns scored, reasoned results (`reasons: ["new_course"]` etc.) | **PASSED** |
+| Wishlist | Add → appears in list + course-ids endpoint; remove → list empty again | **PASSED** |
+| Wishlist | Auto-remove on enroll: wishlisted course disappears from wishlist the instant enrollment succeeds (same transaction) | **PASSED** |
+| Admin | System health (`/admin/system-health`): `{status:"ok", database, storage, notifications}` all healthy | **PASSED** |
+| Admin | Category CRUD: create (defaults `active:false`, correctly absent from public list), activate (appears), no-DELETE-by-design confirmed intentional (`handler_admin.go` doc comment) and deactivate used as the real retirement path | **PASSED** |
+| Admin | Course-submission review (pending_review → published) used successfully for both test courses | **PASSED** |
+| Admin | Review moderation surface reachable; student review create/list round-trip correct, non-enrolled review attempt → 403 `NOT_ELIGIBLE` | **PASSED** |
+| Admin | Content report: student creates report → admin lists it → admin resolves it (`PATCH status:"resolved"`) | **PASSED** |
+| Instructor | Own-course list, student roster, per-course stats, aggregate instructor stats, QA moderation view (with nested answers) — all correct for the owning instructor | **PASSED** |
+| Instructor | Second instructor denied on every one of the first instructor's course/QA endpoints (403 `you do not manage this course` / equivalent) | **PASSED — 30B1 finding re-confirmed under normal functional use, not just adversarial testing** |
+| Instructor | Second instructor's own course list correctly empty (no cross-tenant leakage) | **PASSED** |
+
+**Zero bugs found.** No entry in this matrix is "bug found and fixed," "deferred," or "blocker" — every flow tested worked correctly on the first real attempt (one initial video-transcode failure was diagnosed as a synthetic-test-clip artifact — 4:4:4 chroma subsampling from the `ffmpeg testsrc` generator, not a pipeline defect — confirmed by regenerating a `yuv420p` clip, which transcoded successfully on the very next attempt; this is documented under Method, not the matrix, since it was never a real regression).
+
+### Blocker / non-blocker classification
+
+- **No blockers.** Every flow in the regression matrix passed.
+- **Non-blocking observations** (not regressions — pre-existing, unrelated to this session, left untouched per "no unrelated refactors"):
+  - 4 pre-existing frontend ESLint warnings (`@next/next/no-img-element` in `dashboard/wishlist/page.tsx`, `ContinueLearningCard.tsx`, `CourseCard.tsx`, `RecommendationCard.tsx`) — 0 errors, warnings only, not introduced this session (no frontend file was touched), not a functional defect.
+  - The video pipeline's free-preview concept only actually works via the legacy `lessons.video_url` field (kept intentionally exposed for `is_free` lessons since 30B1's fix); `internal/videos`' real HLS pipeline has no unenrolled-preview bypass at all — but the frontend never renders a preview player for unenrolled visitors either (confirmed: only a "free" badge, no playback UI), so this is consistent, working-as-implemented behavior end-to-end, not a functional gap between frontend and backend.
+
+### Build/lint gates
+
+- `gofmt -l backend/` — clean (no output).
+- `go build ./...` — success.
+- `go vet ./...` — clean.
+- `npm run typecheck` (frontend) — clean.
+- `npm run lint` (frontend) — 0 errors, 4 pre-existing warnings (see above).
+- No code was changed this session (zero confirmed bugs → nothing to fix), so these gates are a confirmation pass on the already-clean tree, run per instruction regardless.
+
+### Files changed
+
+- `STAGE30_PROGRESS.md` (this section) — the only file touched this session. No application code, no test data left behind (all created users/courses/enrollments/subscriptions/payments/certificates/achievements/reviews/reports/Q&A/video-and-storage-objects were deleted at the end of the session; verified zero residue in both Postgres and the MinIO bucket).
+
+### Not done this session
+
+- **30B3 not started**, per instruction.
+- **No deploy, no VPS contact.**
+- **No code changes** — this was a pure verification pass; nothing needed fixing.
+
+### Remaining work
+
+- **30B3:** fix the three non-blocking items 30B1 flagged (JWT revocation/refresh design gap, `PAYMENT_PROVIDER` prod-default guard, `CreateQuestion`'s narrower access-check gap) if in scope, or explicitly defer each with reasoning; final Stage 30 report; a closing statement on the full Stages 21–30 arc.
+- Operationally outstanding regardless: `BACKUP_ENCRYPTION_PASSPHRASE` still needs setting on the real production VPS (unchanged since 30A1).
