@@ -277,3 +277,68 @@ All against the live dev stack (`course-postgres-1`/`course-minio-1`, the same "
 - **30B2 — Full-platform functional regression:** enrollment, learning progress, payments, certificates, Q&A, search, recommendations, admin/instructor dashboards — the exact gap `STAGE20_PROGRESS.md` has named since Stage 20. Not started.
 - **30B3 — Fixes + final Stage 30 report + Stages 21–30 completion statement:** depends entirely on what 30B1/30B2 find; not started, nothing to fix yet.
 - **Operationally outstanding regardless of 30B progress:** `BACKUP_ENCRYPTION_PASSPHRASE` still needs to be set by hand on the real production VPS's `.env` before the schedule in `backup.yml` has any real effect there — true since 30A1, still true now.
+
+---
+
+## Stage 30B1 — Final production security sweep (implemented)
+
+Scope: the roadmap's four named security concerns (auth, IDOR/ownership, payment-source-of-truth, video delivery) plus the additional items instruction 1 named (admin-only ops, instructor course ownership, student boundaries, private object storage, path traversal, cross-course access, secret leakage). No 30B2 (functional regression), no unrelated-domain changes, no deploy.
+
+### Method
+
+Three parallel read-only code-recon passes (auth/authctx/ownership/access core machinery; IDOR/ownership across all 13 non-core domains; payments/video/storage/secret-leakage) followed by live adversarial testing against the running dev stack (`course-*`) using four freshly-registered test accounts (2 students, 2 instructors, promoted via the real admin API — never inserted directly) plus the existing seeded admin account. Every finding below that led to a code change was reproduced live, before and after the fix, not accepted from static reading alone.
+
+### Checks performed (live, against the running stack)
+
+- **Role boundaries (item 3):** student and instructor tokens both correctly rejected at `/admin/*` (403 `insufficient permissions`); no token → 401; garbage token → 401; a student attempting to grant itself the `admin` role via the very admin endpoint that would need it → 403 before the body was ever consulted.
+- **Instructor course ownership (item 4):** instructor2 attempting to read/update/add-a-module-to a course owned by instructor1, all → 403 `you do not manage this course`. A student attempting the instructor course-creation endpoint → 403 (role gate, before any ownership check is even reached).
+- **Cross-course / IDOR via manual ID substitution (items 2, 11):** the QA finding below was found exactly this way — an authenticated-but-never-enrolled student reading another student's question by lesson ID alone.
+- **Payment/subscription source of truth (item 5):** created a real pending payment as one student, confirmed a second student cannot mock-confirm it (403 `you may not confirm another user's payment`) — the owning student then confirmed their own payment and only then did `/me/subscription` flip to `active`, with `status`/`active` computed entirely server-side (no client-writable status field exists in any request DTO, confirmed by code + the live 403 above).
+- **Private object storage (item 7):** direct anonymous HTTP request to the MinIO bucket (bypassing the backend entirely) → `403 AccessDenied` even in dev, where the port is reachable at all; `docker-compose.prod.yml` confirms MinIO has no exposed port whatsoever in production (`ports: !reset []`) — two independent layers, not one.
+- **Path traversal (item 9):** three live attempts against the HLS video-stream proxy (`../../../etc/passwd`, URL-encoded traversal, a bare double-slash absolute path) — all rejected (404/400) before reaching the object-storage key builder; the allow-list regex (not a blacklist) structurally cannot match a traversal sequence.
+- **Secret leakage (item 8):** grepped a fresh slice of live backend container logs (spanning every test above, including the deliberately-triggered 401/403/payment flows) for the literal values of `POSTGRES_PASSWORD`, `JWT_SECRET`, and `S3_SECRET_KEY` — zero occurrences of any of the three.
+- **Build/lint gates (item 11):** `gofmt -l .` (clean), `go build ./...` (success), `go vet ./...` (clean) — run after the fixes below, against the actual changed files. No frontend security path was touched this session, so no frontend typecheck/lint was run (consistent with instruction 11's "only if frontend security paths are touched").
+
+### Bugs found and fixed
+
+**1. QA question-listing had no enrollment/access check (`backend/internal/qa/service.go`, `handler.go`).** `ListForLesson` fetched a lesson's Q&A thread by `lessonID` alone — no `userID` parameter even existed on the function. Live-confirmed: a second student, never enrolled in the course, could `GET /lessons/:id/questions` and read another student's question verbatim. Inconsistent with `CreateQuestion` in the same file, which already required `IsEnrolled`. **Fix:** `ListForLesson` now takes `userID`, resolves the lesson's course via `ownership.CourseIDForLesson`, and requires both `IsEnrolled` and `access.CanAccessCourse` — the same two-check pattern `tests.Service.checkAccess` already uses to gate a *read* of lesson-scoped content elsewhere in this codebase, not a bespoke new rule. `qa.Service` now takes an `*access.Service` (wired in `main.go`, reusing the existing `accessService` instance every other domain already shares). New error `ErrAccessRequired` mapped to `403 ACCESS_REQUIRED`. Live re-verified after rebuild: the previously-successful cross-student read now returns `403 NOT_ENROLLED`; the actually-enrolled student's own read is unaffected (still `200`, same data).
+
+**2. Legacy `lessons.video_url` field leaked on the public, unauthenticated course-detail endpoint (`backend/internal/courses/service.go`).** `video_url` is a Stage-2-era column, superseded by `internal/videos`' enrollment/subscription-checked, presigned-URL delivery pipeline — but it's still a live, admin-writable field, and `GetCourseDetail` (backing `GET /api/v1/courses/:id`, no auth required) returned it unconditionally for every lesson. Live-confirmed: set `video_url` on a non-free, unpublished-course lesson as admin, then fetched the course anonymously (`curl`, no token at all) and got the URL back verbatim — a complete bypass of every enrollment/subscription/presigned-URL check the rest of the system enforces, contingent only on an admin ever having populated that legacy field. **Fix:** `GetCourseDetail` now blanks `VideoURL` for any lesson where `!IsFree` before returning it. Live re-verified: the same lesson, still non-free, now returns `"video_url": ""` to an anonymous caller; re-tested with `is_free: true` on the same lesson afterward to confirm the legitimate free-preview case is unaffected (`video_url` still returned as intended).
+
+Both fixes are minimal and scoped exactly to the confirmed defect — no other field, endpoint, or domain was touched.
+
+### Findings noted but NOT fixed (non-blocking, documented rationale)
+
+- **No refresh/revocation mechanism for JWTs** (found by the auth-core recon pass): access tokens are the only credential (24h TTL, HS256, properly alg-pinned), with no logout, no rotation, and no server-side revocation list — a stolen token can't be invalidated before it expires, and a role change/deactivation doesn't take effect until the holder's existing token naturally expires (up to 24h). This is a design characteristic of the current auth system, not a coding defect, and fixing it (token revocation store, refresh-token rotation) is a materially larger change than a Stage 30B1-scoped fix — flagged for a future stage's explicit scope, not silently accepted as "fine forever."
+- **`ownership.CourseIDForCodeSubmission` is dead code** (zero call sites found outside its own declaration) — a cleanup item, not a security issue; left alone per "fix only confirmed security bugs, no unrelated refactors."
+- **`PAYMENT_PROVIDER` defaults to `"mock"` when unset** (`backend/internal/config/config.go`), and the mock-confirm route is wired whenever that's the active value. Not exploitable as shipped — `.env.production.example` correctly documents overriding it, and this repo has no real payment-provider integration yet for the default to bypass — but there's no code-level guard against a production deploy that forgets to set the env var, which would silently let any authenticated user grant themselves a free active subscription. Not fixed this session: doing so cleanly would require introducing an environment concept (dev/prod) that doesn't exist anywhere in `internal/config` today, which is a design decision beyond "fix a confirmed bug" and belongs with whoever owns the real payment-provider integration, not invented ad hoc here.
+- **`CreateQuestion` checks `IsEnrolled` but not `access.CanAccessCourse`** — a narrower, second-order version of bug #1 above: a student who enrolled in a subscription-gated course and later let their subscription lapse could still post new questions (though, after fix #1, could no longer *read* them). Not live-reproduced this session (would require constructing an expired-subscription-but-still-enrolled state) and is a materially smaller exposure than bug #1 was — noted for a future pass rather than fixed speculatively.
+
+### Remaining risks
+
+- The three "noted but not fixed" items above remain open, with the rationale for each documented in place.
+- This sweep covered the items instruction 1 named; it did not re-touch every single handler in the codebase byte-for-byte (e.g. `certificates`, `wishlist`, `achievements`, `reviews` were code-reviewed and found consistently scoped by the recon pass, but not additionally live-adversarially tested this session the way QA, instructor-ownership, admin-gating, payments, storage, and path-traversal were) — see 30B2's own scope for the full-platform functional pass this doesn't replace.
+
+### Blocker / non-blocker classification
+
+- **Both fixed bugs (QA enrollment check, legacy `video_url` leak) were real, live-confirmed, exploitable-by-any-authenticated-or-even-unauthenticated-user issues — classified as blockers, and both are now fixed and re-verified.**
+- **All three "noted but not fixed" items are classified non-blocking**: none are exploitable in the codebase as it stands today (no real payment provider yet to bypass; no token-revocation incident has occurred; the narrower QA write-path gap requires a specific expired-subscription precondition this session didn't construct) — each is a hardening opportunity for a deliberately-scoped future session, not a live production risk today.
+
+### Files changed
+
+- `backend/internal/qa/service.go`, `backend/internal/qa/handler.go` — QA enrollment/access-check fix.
+- `backend/internal/courses/service.go` — legacy `video_url` public-leak fix.
+- `backend/cmd/api/main.go` — wires `accessService` into `qa.NewService`.
+- `STAGE30_PROGRESS.md` (this section).
+
+### Not done this session
+
+- **30B2 (full-platform functional regression) not started**, per instruction.
+- **No deploy, no VPS contact.**
+- **No unrelated domain touched** — every changed line is inside the two confirmed-bug fixes above; no refactor, no cleanup of the unrelated dead-code/design items noted above.
+
+### Remaining work
+
+- **30B2:** enrollment, learning progress, payments, certificates, Q&A, search, recommendations, admin/instructor dashboards — full-platform functional smoke pass, the `STAGE20_PROGRESS.md`-named gap.
+- **30B3:** depends on 30B2's findings plus the three non-blocking items noted above; final Stage 30 report and Stages 21–30 completion statement.
+- Operationally outstanding regardless: `BACKUP_ENCRYPTION_PASSPHRASE` still needs setting on the real production VPS (unchanged since 30A1).

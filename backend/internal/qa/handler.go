@@ -84,18 +84,29 @@ func idParam(c *gin.Context, name, code, message string) (uuid.UUID, bool) {
 }
 
 func (h *Handler) ListQuestions(c *gin.Context) {
+	userID, _, ok := currentUser(c)
+	if !ok {
+		return
+	}
 	lessonID, ok := idParam(c, "id", "INVALID_LESSON_ID", "lesson id must be a valid UUID")
 	if !ok {
 		return
 	}
 	page, limit := pagination.ParseParams(c.Query("page"), c.Query("limit"))
 
-	result, err := h.service.ListForLesson(c.Request.Context(), lessonID, page, limit)
-	if err != nil {
+	result, err := h.service.ListForLesson(c.Request.Context(), userID, lessonID, page, limit)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, result)
+	case errors.Is(err, ErrLessonMissing):
+		respondError(c, http.StatusNotFound, "LESSON_NOT_FOUND", "lesson not found")
+	case errors.Is(err, ErrNotEnrolled):
+		respondError(c, http.StatusForbidden, "NOT_ENROLLED", "you must be enrolled in this course to view its questions")
+	case errors.Is(err, ErrAccessRequired):
+		respondError(c, http.StatusForbidden, "ACCESS_REQUIRED", "an active subscription is required to view this course's questions")
+	default:
 		respondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list questions")
-		return
 	}
-	c.JSON(http.StatusOK, result)
 }
 
 type questionRequest struct {

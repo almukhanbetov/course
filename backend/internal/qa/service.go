@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"lms-backend/internal/access"
 	"lms-backend/internal/audit"
 	"lms-backend/internal/logging"
 	"lms-backend/internal/ownership"
@@ -14,8 +15,9 @@ import (
 )
 
 var (
-	ErrNotEnrolled = errors.New("user is not enrolled in this course")
-	ErrForbidden   = errors.New("user may not answer in this course")
+	ErrNotEnrolled    = errors.New("user is not enrolled in this course")
+	ErrAccessRequired = errors.New("user does not currently have access to this course")
+	ErrForbidden      = errors.New("user may not answer in this course")
 )
 
 type ValidationError struct {
@@ -35,10 +37,11 @@ type Service struct {
 	repo      *Repository
 	ownership *ownership.Service
 	audit     *audit.Service
+	access    *access.Service
 }
 
-func NewService(repo *Repository, ownershipService *ownership.Service, auditService *audit.Service) *Service {
-	return &Service{repo: repo, ownership: ownershipService, audit: auditService}
+func NewService(repo *Repository, ownershipService *ownership.Service, auditService *audit.Service, accessService *access.Service) *Service {
+	return &Service{repo: repo, ownership: ownershipService, audit: auditService, access: accessService}
 }
 
 func validateBody(body string) error {
@@ -48,7 +51,39 @@ func validateBody(body string) error {
 	return nil
 }
 
-func (s *Service) ListForLesson(ctx context.Context, lessonID uuid.UUID, page, limit int) (pagination.Result[QuestionView], error) {
+// ListForLesson requires the same "enrolled and currently entitled" check
+// tests.Service.checkAccess applies to reading a test — Q&A is lesson
+// content like any other, and this is the codebase's established pattern
+// for gating a *read* of lesson-scoped content (not just the write side,
+// which CreateQuestion already gated). Before this check existed, any
+// authenticated user could read a lesson's Q&A thread — including
+// subscription-gated course content — without ever enrolling (Stage 30B1
+// finding).
+func (s *Service) ListForLesson(ctx context.Context, userID, lessonID uuid.UUID, page, limit int) (pagination.Result[QuestionView], error) {
+	courseID, err := s.ownership.CourseIDForLesson(ctx, lessonID)
+	if errors.Is(err, ownership.ErrNotFound) {
+		return pagination.Result[QuestionView]{}, ErrLessonMissing
+	}
+	if err != nil {
+		return pagination.Result[QuestionView]{}, err
+	}
+
+	enrolled, err := s.repo.IsEnrolled(ctx, userID, courseID)
+	if err != nil {
+		return pagination.Result[QuestionView]{}, err
+	}
+	if !enrolled {
+		return pagination.Result[QuestionView]{}, ErrNotEnrolled
+	}
+
+	canAccess, err := s.access.CanAccessCourse(ctx, userID, courseID)
+	if err != nil {
+		return pagination.Result[QuestionView]{}, err
+	}
+	if !canAccess {
+		return pagination.Result[QuestionView]{}, ErrAccessRequired
+	}
+
 	items, total, err := s.repo.ListForLesson(ctx, lessonID, limit, pagination.Offset(page, limit))
 	if err != nil {
 		return pagination.Result[QuestionView]{}, err

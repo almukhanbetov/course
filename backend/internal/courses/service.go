@@ -116,8 +116,21 @@ func (s *Service) GetCourseDetail(ctx context.Context, id uuid.UUID) (*CourseDet
 		return nil, err
 	}
 
+	// VideoURL is the legacy, pre-internal/videos field (Stage 2) — every
+	// current lesson video goes through internal/videos' own
+	// enrollment/subscription-checked, presigned-URL delivery instead, but
+	// this column is still live and admin-writable. Stripped here for any
+	// lesson that isn't a free preview: this is a public, unauthenticated
+	// endpoint, and without this it would hand out a playable link to
+	// paid-course video content with none of internal/videos' access
+	// checks (Stage 30B1 finding). Every other field is left as-is —
+	// description/title etc. are not access-controlled elsewhere either,
+	// only this field is a direct, working link to the asset itself.
 	lessonsByModule := make(map[uuid.UUID][]Lesson, len(modules))
 	for _, l := range lessons {
+		if !l.IsFree {
+			l.VideoURL = ""
+		}
 		lessonsByModule[l.ModuleID] = append(lessonsByModule[l.ModuleID], l)
 	}
 

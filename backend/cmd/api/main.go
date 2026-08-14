@@ -238,7 +238,7 @@ func main() {
 	// the answer-authorization rule. Stage 25A2: also depends on
 	// auditService, to record hide/show moderation events.
 	qaRepo := qa.NewRepository(pool)
-	qaService := qa.NewService(qaRepo, ownershipService, auditService)
+	qaService := qa.NewService(qaRepo, ownershipService, auditService, accessService)
 	qaHandler := qa.NewHandler(qaService)
 
 	// Stage 24A2: content abuse reporting (internal/reports) — one
