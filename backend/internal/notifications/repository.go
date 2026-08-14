@@ -234,6 +234,27 @@ func (r *Repository) MarkAllRead(ctx context.Context, userID uuid.UUID) error {
 
 // --- admin monitoring ---------------------------------------------------
 
+// PendingQueueDepth reports how many notification_jobs are currently
+// pending and how long the oldest one has been waiting. Used only by the
+// deep health check (Stage 29A3) to infer whether notification-worker is
+// keeping up — there's no separate worker-liveness/heartbeat mechanism, so
+// this reads the same persisted queue state the worker itself claims from,
+// rather than adding a new one.
+func (r *Repository) PendingQueueDepth(ctx context.Context) (count int, oldestAge time.Duration, err error) {
+	var oldest *time.Time
+	err = r.pool.QueryRow(ctx,
+		`SELECT count(*), min(created_at) FROM notification_jobs WHERE status = $1`,
+		JobPending,
+	).Scan(&count, &oldest)
+	if err != nil {
+		return 0, 0, err
+	}
+	if oldest == nil {
+		return count, 0, nil
+	}
+	return count, time.Since(*oldest), nil
+}
+
 func (r *Repository) ListJobsAdmin(ctx context.Context, status, channel string, limit, offset int) ([]AdminJobSummary, int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT j.id, j.user_id, j.type, j.payload, j.channel, j.status, j.attempts,

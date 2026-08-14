@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,11 +25,13 @@ import (
 	"lms-backend/internal/health"
 	"lms-backend/internal/instructor"
 	"lms-backend/internal/learning"
+	"lms-backend/internal/logging"
 	"lms-backend/internal/notifications"
 	"lms-backend/internal/ownership"
 	"lms-backend/internal/qa"
 	"lms-backend/internal/recommendations"
 	"lms-backend/internal/reports"
+	"lms-backend/internal/requestid"
 	"lms-backend/internal/reviews"
 	"lms-backend/internal/specialities"
 	"lms-backend/internal/subscriptions"
@@ -39,20 +42,21 @@ import (
 )
 
 func main() {
+	logging.Init()
+
 	cfg := config.Load()
 	if cfg.JWTSecret == "" {
-		log.Fatal("JWT_SECRET is required")
+		slog.Error("JWT_SECRET is required")
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("database connection failed: %v", err)
+		slog.Error("database connection failed", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
-
-	healthService := health.NewService(pool)
-	healthHandler := health.NewHandler(healthService)
 
 	coursesRepo := courses.NewRepository(pool)
 	coursesService := courses.NewService(coursesRepo)
@@ -117,7 +121,8 @@ func main() {
 		Region:         cfg.S3Region,
 	})
 	if err != nil {
-		log.Fatalf("failed to configure video storage client: %v", err)
+		slog.Error("failed to configure video storage client", "error", err)
+		os.Exit(1)
 	}
 	// The storage client itself never fails to construct (it doesn't dial
 	// anything), so confirm the bucket is actually reachable here — but only
@@ -126,7 +131,7 @@ func main() {
 	// only the video endpoints will fail, and only when actually called.
 	pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
 	if err := videoStorage.Ping(pingCtx); err != nil {
-		log.Printf("WARNING: video storage is not reachable yet (bucket %q via %s): %v", cfg.S3Bucket, cfg.S3Endpoint, err)
+		slog.Warn("video storage not reachable yet", "bucket", cfg.S3Bucket, "endpoint", cfg.S3Endpoint, "error", err)
 	}
 	cancelPing()
 
@@ -163,6 +168,14 @@ func main() {
 	notificationsRepo := notifications.NewRepository(pool)
 	notificationsService := notifications.NewService(notificationsRepo)
 	notificationsHandler := notifications.NewHandler(notificationsService)
+
+	// Stage 29A3: deep health check. Constructed here, not earlier, because
+	// it reuses videoStorage (constructed above, Stage 5's S3 client) and
+	// notificationsRepo (just constructed) rather than standing up any new
+	// MinIO client or queue-liveness mechanism of its own — see
+	// internal/health/service.go's own doc comments for why.
+	healthService := health.NewService(pool, videoStorage, notificationsRepo)
+	healthHandler := health.NewHandler(healthService)
 
 	// Stage 14: instructor dashboard + course authoring. ownershipService is
 	// the single centralized "may this user manage this course" check;
@@ -238,7 +251,14 @@ func main() {
 	reportsService := reports.NewService(reportsRepo, auditService)
 	reportsHandler := reports.NewHandler(reportsService)
 
-	router := gin.Default()
+	// gin.New(), not gin.Default() — Default() bundles its own plain-text
+	// access logger, which would produce a second, differently-formatted
+	// log line per request alongside requestid.Middleware()'s structured,
+	// correlated one. Recovery() is kept; it's the only other piece
+	// gin.Default() provided.
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(requestid.Middleware())
 
 	v1 := router.Group("/api/v1")
 	healthHandler.RegisterRoutes(v1)
@@ -282,6 +302,7 @@ func main() {
 	adminGroup.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	healthHandler.RegisterAdminRoutes(adminGroup)
 	adminHandler.RegisterAdminRoutes(adminGroup)
 	usersHandler.RegisterAdminRoutes(adminGroup)
 	coursesHandler.RegisterAdminRoutes(adminGroup)
@@ -297,8 +318,9 @@ func main() {
 	reportsHandler.RegisterAdminRoutes(adminGroup)
 	auditHandler.RegisterAdminRoutes(adminGroup)
 
-	log.Printf("starting server on port %s", cfg.Port)
+	slog.Info("starting server", "port", cfg.Port)
 	if err := router.Run(":" + cfg.Port); err != nil {
-		log.Fatalf("server failed: %v", err)
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
 	}
 }

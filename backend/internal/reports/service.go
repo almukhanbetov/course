@@ -3,12 +3,12 @@ package reports
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"lms-backend/internal/audit"
+	"lms-backend/internal/logging"
 	"lms-backend/internal/pagination"
 )
 
@@ -140,6 +140,6 @@ func (s *Service) logStatusUpdate(ctx context.Context, actorUserID uuid.UUID, ac
 		},
 	})
 	if err != nil {
-		log.Printf("audit: failed to log %s for report %s: %v", action, report.ID, err)
+		logging.FromContext(ctx).Error("audit: failed to log", "action", action, "report_id", report.ID, "error", err)
 	}
 }

@@ -42,7 +42,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -363,10 +363,14 @@ type Worker struct {
 	repo    *Repository
 	cfg     WorkerConfig
 	runners map[string]LanguageRunner
+	log     *slog.Logger
 }
 
+// slog.With, not a package-level var — see videos.NewWorker's identical
+// comment: this must run after cmd/code-runner's main() has already called
+// logging.Init(), which a package-level var would not.
 func NewWorker(repo *Repository, cfg WorkerConfig, runners map[string]LanguageRunner) *Worker {
-	return &Worker{repo: repo, cfg: cfg, runners: runners}
+	return &Worker{repo: repo, cfg: cfg, runners: runners, log: slog.With("service", "code-runner")}
 }
 
 // ClaimAndProcess claims at most one pending job and processes it fully (or
@@ -382,7 +386,7 @@ func (w *Worker) ClaimAndProcess(ctx context.Context) (claimed bool, err error) 
 		return false, err
 	}
 
-	log.Printf("code-runner: claimed job=%s submission=%s attempt=%d", job.ID, job.SubmissionID, job.Attempts)
+	w.log.Info("claimed job", "job_id", job.ID, "submission_id", job.SubmissionID, "attempt", job.Attempts)
 
 	execCtx, loadErr := w.repo.GetExecutionContext(ctx, job.SubmissionID)
 	if loadErr != nil {
@@ -395,7 +399,7 @@ func (w *Worker) ClaimAndProcess(ctx context.Context) (claimed bool, err error) 
 
 	result, procErr := w.execute(ctx, execCtx)
 	if procErr != nil {
-		log.Printf("code-runner: job=%s submission=%s infrastructure failure: %v", job.ID, job.SubmissionID, procErr)
+		w.log.Error("infrastructure failure", "job_id", job.ID, "submission_id", job.SubmissionID, "error", procErr)
 		return true, w.retryOrFail(ctx, job, procErr)
 	}
 
@@ -406,7 +410,7 @@ func (w *Worker) ClaimAndProcess(ctx context.Context) (claimed bool, err error) 
 	if err := w.repo.MarkJobCompleted(ctx, job.ID); err != nil {
 		return true, err
 	}
-	log.Printf("code-runner: job=%s submission=%s finished status=%s passed=%d/%d", job.ID, job.SubmissionID, result.Status, result.PassedTests, result.TotalTests)
+	w.log.Info("job finished", "job_id", job.ID, "submission_id", job.SubmissionID, "status", result.Status, "passed_tests", result.PassedTests, "total_tests", result.TotalTests)
 	return true, nil
 }
 
@@ -422,10 +426,10 @@ func (w *Worker) retryOrFail(ctx context.Context, job *ExecutionJob, procErr err
 		return markErr
 	}
 	if retried {
-		log.Printf("code-runner: job=%s will retry (attempt %d/%d): %v", job.ID, job.Attempts, w.cfg.MaxAttempts, procErr)
+		w.log.Warn("job will retry", "job_id", job.ID, "attempt", job.Attempts, "max_attempts", w.cfg.MaxAttempts, "error", procErr)
 		return nil
 	}
-	log.Printf("code-runner: job=%s exhausted retries, marking submission=%s internal_error: %v", job.ID, job.SubmissionID, procErr)
+	w.log.Error("job exhausted retries, marking submission internal_error", "job_id", job.ID, "submission_id", job.SubmissionID, "error", procErr)
 	return w.repo.MarkSubmissionResult(ctx, job.SubmissionID, ExecutionResult{Status: StatusInternalError}, false)
 }
 

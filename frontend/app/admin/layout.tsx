@@ -4,6 +4,7 @@ import { logoutAction } from "@/lib/actions";
 import { SidebarShell } from "@/components/shell/SidebarShell";
 import type { SidebarNavGroup } from "@/components/shell/Sidebar";
 import {
+  IconActivity,
   IconAward,
   IconBarChart,
   IconBell,
@@ -37,7 +38,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   const groups: SidebarNavGroup[] = [
-    { items: [{ href: "/admin", label: "Dashboard", icon: <IconDashboard size={18} />, exact: true }] },
+    {
+      items: [
+        { href: "/admin", label: "Dashboard", icon: <IconDashboard size={18} />, exact: true },
+        { href: "/admin/system-health", label: "System Health", icon: <IconActivity size={18} /> },
+      ],
+    },
     {
       label: "Каталог",
       items: [

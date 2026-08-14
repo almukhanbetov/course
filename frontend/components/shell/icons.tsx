@@ -212,3 +212,11 @@ export const IconFlag = (p: IconProps = {}) =>
     </>,
     p
   );
+
+// Vitals/pulse line — Stage 29A5's /admin/system-health nav entry.
+// IconHeart already exists but is already the wishlist icon elsewhere in
+// this app (app/dashboard/layout.tsx); reusing it here for an unrelated
+// meaning would be confusing, so this is one more glyph in the same
+// hand-rolled set rather than a new design system.
+export const IconActivity = (p: IconProps = {}) =>
+  base(<path d="M3 12h4l2.5-7 4 14 2.5-7H21" />, p);

@@ -1846,6 +1846,27 @@ a.recommendation-card:hover {
   background: var(--danger-soft);
 }
 
+/* Stage 29A5: /admin/system-health — same badge-status-<value> convention
+   as course publication status above, just a different status vocabulary
+   (backend/internal/health/service.go's Status is only ever "ok"/"degraded"). */
+.badge-status-ok {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.badge-status-degraded {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.badge-status-unavailable {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .instructor-course-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);

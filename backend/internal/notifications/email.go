@@ -3,7 +3,7 @@ package notifications
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/smtp"
 	"strings"
 )
@@ -31,7 +31,7 @@ type EmailSender interface {
 type LogSender struct{}
 
 func (LogSender) Send(_ context.Context, msg EmailMessage) error {
-	log.Printf("notification-worker: [DEV EMAIL] to=%s subject=%q (no SMTP_HOST configured, not actually sent)", msg.To, msg.Subject)
+	slog.Info("notification-worker: dev email not sent, SMTP_HOST unconfigured", "service", "notification-worker", "to", msg.To, "subject", msg.Subject)
 	return nil
 }
 

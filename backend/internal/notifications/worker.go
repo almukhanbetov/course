@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -21,10 +21,14 @@ type Worker struct {
 	repo  *Repository
 	email EmailSender
 	cfg   WorkerConfig
+	log   *slog.Logger
 }
 
+// slog.With, not a package-level var — see videos.NewWorker's identical
+// comment: this must run after cmd/notification-worker's main() has
+// already called logging.Init(), which a package-level var would not.
 func NewWorker(repo *Repository, email EmailSender, cfg WorkerConfig) *Worker {
-	return &Worker{repo: repo, email: email, cfg: cfg}
+	return &Worker{repo: repo, email: email, cfg: cfg, log: slog.With("service", "notification-worker")}
 }
 
 // ClaimAndProcess mirrors video.Worker.ClaimAndProcess's exact shape —
@@ -39,20 +43,19 @@ func (w *Worker) ClaimAndProcess(ctx context.Context) (claimed bool, err error) 
 		return false, err
 	}
 
-	log.Printf("notification-worker: claimed job=%s user=%s type=%s channel=%s attempt=%d",
-		job.ID, job.UserID, job.Type, job.Channel, job.Attempts)
+	w.log.Info("claimed job", "job_id", job.ID, "user_id", job.UserID, "type", job.Type, "channel", job.Channel, "attempt", job.Attempts)
 
 	if procErr := w.processJob(ctx, job); procErr != nil {
-		log.Printf("notification-worker: job=%s failed: %v", job.ID, procErr)
+		w.log.Error("job failed", "job_id", job.ID, "error", procErr)
 
 		retried, markErr := w.repo.MarkJobFailedOrRetry(ctx, job.ID, job.Attempts, w.cfg.MaxAttempts, truncateError(procErr), w.cfg.RetryBackoff)
 		if markErr != nil {
 			return true, markErr
 		}
 		if retried {
-			log.Printf("notification-worker: job=%s will retry (attempt %d/%d)", job.ID, job.Attempts, w.cfg.MaxAttempts)
+			w.log.Warn("job will retry", "job_id", job.ID, "attempt", job.Attempts, "max_attempts", w.cfg.MaxAttempts)
 		} else {
-			log.Printf("notification-worker: job=%s exhausted retries, marked failed", job.ID)
+			w.log.Error("job exhausted retries, marked failed", "job_id", job.ID)
 		}
 		return true, nil
 	}
@@ -60,7 +63,7 @@ func (w *Worker) ClaimAndProcess(ctx context.Context) (claimed bool, err error) 
 	if err := w.repo.MarkJobCompleted(ctx, job.ID); err != nil {
 		return true, err
 	}
-	log.Printf("notification-worker: job=%s completed", job.ID)
+	w.log.Info("job completed", "job_id", job.ID)
 	return true, nil
 }
 
@@ -96,16 +99,16 @@ func (w *Worker) processJob(ctx context.Context, job *Job) error {
 func (w *Worker) RunExpiryScan(ctx context.Context, warningDays int) {
 	warned, err := w.repo.ScanExpiringSoon(ctx, warningDays)
 	if err != nil {
-		log.Printf("notification-worker: expiry-warning scan failed: %v", err)
+		w.log.Error("expiry-warning scan failed", "error", err)
 	} else if warned > 0 {
-		log.Printf("notification-worker: expiry-warning scan enqueued %d job(s)", warned)
+		w.log.Info("expiry-warning scan enqueued jobs", "count", warned)
 	}
 
 	expired, err := w.repo.ScanNewlyExpired(ctx)
 	if err != nil {
-		log.Printf("notification-worker: expired scan failed: %v", err)
+		w.log.Error("expired scan failed", "error", err)
 	} else if expired > 0 {
-		log.Printf("notification-worker: expired scan enqueued %d notification(s)", expired)
+		w.log.Info("expired scan enqueued notifications", "count", expired)
 	}
 }
 

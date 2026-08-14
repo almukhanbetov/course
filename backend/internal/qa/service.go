@@ -3,12 +3,12 @@ package qa
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"lms-backend/internal/audit"
+	"lms-backend/internal/logging"
 	"lms-backend/internal/ownership"
 	"lms-backend/internal/pagination"
 )
@@ -265,6 +265,6 @@ func (s *Service) logPublishedChange(ctx context.Context, actorUserID uuid.UUID,
 		Metadata:    map[string]any{"course_id": courseID, "published": published},
 	})
 	if err != nil {
-		log.Printf("audit: failed to log %s for %s %s: %v", action, entityType, entityID, err)
+		logging.FromContext(ctx).Error("audit: failed to log", "action", action, "entity_type", entityType, "entity_id", entityID, "error", err)
 	}
 }

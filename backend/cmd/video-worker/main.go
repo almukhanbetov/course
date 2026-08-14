@@ -8,22 +8,27 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"lms-backend/internal/config"
 	"lms-backend/internal/db"
+	"lms-backend/internal/logging"
 	"lms-backend/internal/videos"
 )
 
 func main() {
+	logging.Init()
+
 	cfg := config.Load()
 
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("video-worker: database connection failed: %v", err)
+		slog.Error("video-worker: database connection failed", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -36,12 +41,13 @@ func main() {
 		Region:         cfg.S3Region,
 	})
 	if err != nil {
-		log.Fatalf("video-worker: failed to configure storage client: %v", err)
+		slog.Error("video-worker: failed to configure storage client", "error", err)
+		os.Exit(1)
 	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	if err := storage.Ping(pingCtx); err != nil {
-		log.Printf("video-worker: WARNING storage not reachable yet (bucket %q via %s): %v", cfg.S3Bucket, cfg.S3Endpoint, err)
+		slog.Warn("video-worker: storage not reachable yet", "bucket", cfg.S3Bucket, "endpoint", cfg.S3Endpoint, "error", err)
 	}
 	cancel()
 
@@ -58,12 +64,12 @@ func main() {
 	go serveHealthz()
 
 	pollInterval := time.Duration(cfg.VideoJobPollIntervalS) * time.Second
-	log.Printf("video-worker: started (poll=%s max_attempts=%d segment_duration=%ds)", pollInterval, cfg.VideoJobMaxAttempts, cfg.HLSSegmentDurationSec)
+	slog.Info("video-worker: started", "poll_interval", pollInterval.String(), "max_attempts", cfg.VideoJobMaxAttempts, "segment_duration_sec", cfg.HLSSegmentDurationSec)
 
 	for {
 		claimed, err := worker.ClaimAndProcess(ctx)
 		if err != nil {
-			log.Printf("video-worker: error claiming/processing job: %v", err)
+			slog.Error("video-worker: error claiming/processing job", "error", err)
 			time.Sleep(pollInterval)
 			continue
 		}
@@ -80,6 +86,6 @@ func serveHealthz() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	if err := http.ListenAndServe(":8090", mux); err != nil {
-		log.Printf("video-worker: healthz listener stopped: %v", err)
+		slog.Error("video-worker: healthz listener stopped", "error", err)
 	}
 }

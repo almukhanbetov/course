@@ -8,28 +8,33 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"lms-backend/internal/config"
 	"lms-backend/internal/db"
+	"lms-backend/internal/logging"
 	"lms-backend/internal/notifications"
 )
 
 func main() {
+	logging.Init()
+
 	cfg := config.Load()
 
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("notification-worker: database connection failed: %v", err)
+		slog.Error("notification-worker: database connection failed", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
 	var emailSender notifications.EmailSender
 	if cfg.SMTPHost == "" {
-		log.Println("notification-worker: SMTP_HOST not set, using LogSender (emails will only be logged, not sent)")
+		slog.Info("notification-worker: SMTP_HOST not set, using LogSender (emails will only be logged, not sent)")
 		emailSender = notifications.LogSender{}
 	} else {
 		emailSender = notifications.NewSMTPSender(notifications.SMTPConfig{
@@ -54,8 +59,9 @@ func main() {
 
 	pollInterval := time.Duration(cfg.NotificationJobPollIntervalS) * time.Second
 	scanInterval := time.Duration(cfg.NotificationScanIntervalS) * time.Second
-	log.Printf("notification-worker: started (poll=%s scan=%s max_attempts=%d warning_days=%d)",
-		pollInterval, scanInterval, cfg.NotificationJobMaxAttempts, cfg.SubscriptionExpiryWarningDays)
+	slog.Info("notification-worker: started",
+		"poll_interval", pollInterval.String(), "scan_interval", scanInterval.String(),
+		"max_attempts", cfg.NotificationJobMaxAttempts, "warning_days", cfg.SubscriptionExpiryWarningDays)
 
 	lastScan := time.Time{}
 	for {
@@ -66,7 +72,7 @@ func main() {
 
 		claimed, err := worker.ClaimAndProcess(ctx)
 		if err != nil {
-			log.Printf("notification-worker: error claiming/processing job: %v", err)
+			slog.Error("notification-worker: error claiming/processing job", "error", err)
 			time.Sleep(pollInterval)
 			continue
 		}
@@ -83,6 +89,6 @@ func serveHealthz() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	if err := http.ListenAndServe(":8091", mux); err != nil {
-		log.Printf("notification-worker: healthz listener stopped: %v", err)
+		slog.Error("notification-worker: healthz listener stopped", "error", err)
 	}
 }

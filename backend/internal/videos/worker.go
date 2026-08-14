@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -54,10 +54,16 @@ type Worker struct {
 	repo    *Repository
 	storage VideoStorage
 	cfg     WorkerConfig
+	log     *slog.Logger
 }
 
+// slog.With, not a package-level var: this runs at NewWorker call time
+// (after cmd/video-worker's main() has already called logging.Init()), so
+// it correctly captures the JSON-configured default logger — a
+// package-level var would instead capture whatever slog.Default() was
+// *before* Init() ever ran.
 func NewWorker(repo *Repository, storage VideoStorage, cfg WorkerConfig) *Worker {
-	return &Worker{repo: repo, storage: storage, cfg: cfg}
+	return &Worker{repo: repo, storage: storage, cfg: cfg, log: slog.With("service", "video-worker")}
 }
 
 // ClaimAndProcess claims at most one pending job and processes it fully
@@ -73,19 +79,19 @@ func (w *Worker) ClaimAndProcess(ctx context.Context) (claimed bool, err error) 
 		return false, err
 	}
 
-	log.Printf("video-worker: claimed job=%s video=%s attempt=%d", job.ID, job.LessonVideoID, job.Attempts)
+	w.log.Info("claimed job", "job_id", job.ID, "video_id", job.LessonVideoID, "attempt", job.Attempts)
 
 	if procErr := w.processJob(ctx, job); procErr != nil {
-		log.Printf("video-worker: job=%s video=%s failed: %v", job.ID, job.LessonVideoID, procErr)
+		w.log.Error("job failed", "job_id", job.ID, "video_id", job.LessonVideoID, "error", procErr)
 
 		retried, markErr := w.repo.MarkJobFailedOrRetry(ctx, job.ID, job.Attempts, w.cfg.MaxAttempts, truncateError(procErr), w.cfg.RetryBackoff)
 		if markErr != nil {
 			return true, markErr
 		}
 		if retried {
-			log.Printf("video-worker: job=%s will retry (attempt %d/%d)", job.ID, job.Attempts, w.cfg.MaxAttempts)
+			w.log.Warn("job will retry", "job_id", job.ID, "attempt", job.Attempts, "max_attempts", w.cfg.MaxAttempts)
 		} else {
-			log.Printf("video-worker: job=%s exhausted retries, marking video=%s failed", job.ID, job.LessonVideoID)
+			w.log.Error("job exhausted retries, marking video failed", "job_id", job.ID, "video_id", job.LessonVideoID)
 			if err := w.repo.MarkVideoFailed(ctx, job.LessonVideoID, humanReadableError(procErr)); err != nil {
 				return true, err
 			}
@@ -96,7 +102,7 @@ func (w *Worker) ClaimAndProcess(ctx context.Context) (claimed bool, err error) 
 	if err := w.repo.MarkJobCompleted(ctx, job.ID); err != nil {
 		return true, err
 	}
-	log.Printf("video-worker: job=%s video=%s completed", job.ID, job.LessonVideoID)
+	w.log.Info("job completed", "job_id", job.ID, "video_id", job.LessonVideoID)
 	return true, nil
 }
 
@@ -140,7 +146,7 @@ func (w *Worker) processJob(ctx context.Context, job *VideoJob) error {
 		if err := w.repo.UpsertRendition(ctx, video.ID, r.Quality, r.Width, r.Height, r.VideoKbps, RenditionReady, &playlistKey); err != nil {
 			return fmt.Errorf("finalize rendition %s: %w", r.Quality, err)
 		}
-		log.Printf("video-worker: video=%s rendition=%s ready", video.ID, r.Quality)
+		w.log.Info("rendition ready", "video_id", video.ID, "quality", r.Quality)
 	}
 
 	masterKey, err := w.buildAndUploadMaster(ctx, video.ID, renditions)
@@ -154,15 +160,15 @@ func (w *Worker) processJob(ctx context.Context, job *VideoJob) error {
 	}
 
 	if replaced != nil {
-		log.Printf("video-worker: video=%s activated, superseding old video=%s", video.ID, replaced.ID)
+		w.log.Info("video activated, superseding old video", "video_id", video.ID, "superseded_video_id", replaced.ID)
 		// Cleanup happens strictly after activation already committed —
 		// a failure here must never undo a successful switch-over
 		// (item 21: cleanup can be safely left for a later sweep).
 		if err := w.storage.DeletePrefix(ctx, videoPrefix(replaced.ID)); err != nil {
-			log.Printf("video-worker: cleanup of superseded video=%s storage failed (non-fatal): %v", replaced.ID, err)
+			w.log.Warn("cleanup of superseded video storage failed", "video_id", replaced.ID, "error", err)
 		}
 		if err := w.repo.DeleteVideoRowByID(ctx, replaced.ID); err != nil {
-			log.Printf("video-worker: cleanup of superseded video=%s row failed (non-fatal): %v", replaced.ID, err)
+			w.log.Warn("cleanup of superseded video row failed", "video_id", replaced.ID, "error", err)
 		}
 	}
 

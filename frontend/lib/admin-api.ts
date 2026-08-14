@@ -157,6 +157,51 @@ export async function adminGetStats(token: string): Promise<AdminStats> {
   return res.json();
 }
 
+// Mirrors backend/internal/health/service.go's ComponentStatus/DeepStatus
+// exactly (Stage 29A3) — Status is only ever "ok" or "degraded", Detail is
+// short operational text (a pending-job count, "unreachable"), never a raw
+// error, hostname, or credential — the backend itself already keeps this
+// endpoint's response safe, this type just describes what it sends.
+export interface AdminSystemHealthComponent {
+  status: "ok" | "degraded";
+  detail?: string;
+}
+
+export interface AdminSystemHealth {
+  status: "ok" | "degraded";
+  database: AdminSystemHealthComponent;
+  storage: AdminSystemHealthComponent;
+  notifications: AdminSystemHealthComponent;
+}
+
+// Distinct from the generic Error every other adminGet* throws — this page
+// wants to tell a stale/expired session (401) apart from "not an admin"
+// (403) apart from anything else, per Stage 29A5's own scope.
+export class AdminSystemHealthError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export async function adminGetSystemHealth(token: string): Promise<AdminSystemHealth> {
+  const res = await fetch(`${SERVER_API_URL}/api/v1/admin/system-health`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  });
+  // Unlike every other admin-api call, a non-2xx here isn't necessarily a
+  // failed request: the backend deliberately returns 503 (not 200) exactly
+  // when status is "degraded" — that's the real, meaningful result this
+  // page exists to show, not an error to discard. Only something else
+  // (401/403/an unparseable body/a genuine 5xx) means the page itself
+  // failed to load.
+  if (res.ok || res.status === 503) {
+    return res.json();
+  }
+  throw new AdminSystemHealthError(await parseErrorMessage(res), res.status);
+}
+
 export async function adminListUsers(
   token: string,
   params: { page?: number; limit?: number; search?: string },

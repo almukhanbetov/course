@@ -12,23 +12,28 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"time"
 
 	"lms-backend/internal/coding"
 	"lms-backend/internal/config"
 	"lms-backend/internal/db"
+	"lms-backend/internal/logging"
 )
 
 func main() {
+	logging.Init()
+
 	cfg := config.Load()
 
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("code-runner: database connection failed: %v", err)
+		slog.Error("code-runner: database connection failed", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -49,13 +54,14 @@ func main() {
 	go serveHealthz()
 
 	pollInterval := time.Duration(cfg.CodeRunnerJobPollIntervalS) * time.Second
-	log.Printf("code-runner: started (poll=%s max_attempts=%d timeout=%dms memory=%dMB max_output=%dKB)",
-		pollInterval, cfg.CodeRunnerJobMaxAttempts, cfg.CodeRunnerTimeoutMS, cfg.CodeRunnerMemoryMB, cfg.CodeRunnerMaxOutputKB)
+	slog.Info("code-runner: started",
+		"poll_interval", pollInterval.String(), "max_attempts", cfg.CodeRunnerJobMaxAttempts,
+		"timeout_ms", cfg.CodeRunnerTimeoutMS, "memory_mb", cfg.CodeRunnerMemoryMB, "max_output_kb", cfg.CodeRunnerMaxOutputKB)
 
 	for {
 		claimed, err := worker.ClaimAndProcess(ctx)
 		if err != nil {
-			log.Printf("code-runner: error claiming/processing job: %v", err)
+			slog.Error("code-runner: error claiming/processing job", "error", err)
 			time.Sleep(pollInterval)
 			continue
 		}
@@ -73,7 +79,7 @@ func main() {
 func checkSandboxTooling() {
 	for _, bin := range []string{"timeout", "unshare", "env", "sh"} {
 		if _, err := exec.LookPath(bin); err != nil {
-			log.Printf("code-runner: WARNING sandbox dependency %q not found on PATH — submissions will fail: %v", bin, err)
+			slog.Warn("code-runner: sandbox dependency not found on PATH, submissions will fail", "dependency", bin, "error", err)
 		}
 	}
 }
@@ -109,6 +115,6 @@ func serveHealthz() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	if err := http.ListenAndServe(":8092", mux); err != nil {
-		log.Printf("code-runner: healthz listener stopped: %v", err)
+		slog.Error("code-runner: healthz listener stopped", "error", err)
 	}
 }
