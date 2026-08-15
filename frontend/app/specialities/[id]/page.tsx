@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSpeciality, getMyRoadmap } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
+import { pluralizeRu } from "@/lib/pluralize";
 
 export default async function SpecialityDetailPage({
   params,
@@ -39,27 +40,39 @@ export default async function SpecialityDetailPage({
 
   return (
     <main>
-      <Link href="/specialities">← Все специальности</Link>
-      <h1>{speciality.title}</h1>
-      <p>{speciality.description}</p>
+      <nav className="breadcrumbs" aria-label="Хлебные крошки">
+        <Link href="/">Главная</Link>
+        <span>/</span>
+        <Link href="/specialities">Специальности</Link>
+        <span>/</span>
+        <span>{speciality.title}</span>
+      </nav>
 
-      {roadmap && (
-        <div className="status">
-          <p>
-            <strong>Общий прогресс:</strong> {roadmap.progress_percent}%
-            {roadmap.completed ? " · специальность завершена" : ""}
-          </p>
-          <div className="progress-bar">
-            <div className="progress-bar-fill" style={{ width: `${roadmap.progress_percent}%` }} />
-          </div>
-        </div>
-      )}
-
-      {!token && (
+      <div className="course-hero">
+        <h1>{speciality.title}</h1>
+        <p className="course-hero-description">{speciality.description}</p>
         <p className="subtitle">
-          <Link href="/login">Войдите</Link>, чтобы видеть свой прогресс по этой специальности.
+          {speciality.courses.length} {pluralizeRu(speciality.courses.length, "курс", "курса", "курсов")} в roadmap
         </p>
-      )}
+
+        {roadmap && (
+          <div className="status">
+            <p>
+              <strong>Общий прогресс:</strong> {roadmap.progress_percent}%
+              {roadmap.completed ? " · специальность завершена" : ""}
+            </p>
+            <div className="progress-bar">
+              <div className="progress-bar-fill" style={{ width: `${roadmap.progress_percent}%` }} />
+            </div>
+          </div>
+        )}
+
+        {!token && (
+          <p className="subtitle">
+            <Link href="/login">Войдите</Link>, чтобы видеть свой прогресс по этой специальности.
+          </p>
+        )}
+      </div>
 
       <h2>Roadmap</h2>
       <ol className="roadmap">

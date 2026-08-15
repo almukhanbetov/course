@@ -4,11 +4,26 @@ import { getSessionToken } from "@/lib/session";
 import { CourseCard } from "@/components/CourseCard";
 import { CourseFilters } from "@/components/CourseFilters";
 import { CoursePagination } from "@/components/CoursePagination";
+import { pluralizeRu } from "@/lib/pluralize";
 
-type SearchParams = Record<string, string | string[] | undefined>;
+export type SearchParams = Record<string, string | string[] | undefined>;
 
-function first(value: string | string[] | undefined): string {
+export function first(value: string | string[] | undefined): string {
   return (Array.isArray(value) ? value[0] : value) ?? "";
+}
+
+// Shared by CourseListing and any caller that renders CourseFilters itself
+// (e.g. /courses' left sidebar) — keeps the searchParams -> form-values
+// parsing in exactly one place.
+export function parseCourseFilters(searchParams: SearchParams, fixedCategory?: string) {
+  return {
+    q: first(searchParams.q),
+    level: first(searchParams.level),
+    access_type: first(searchParams.access_type),
+    sort: first(searchParams.sort),
+    category: fixedCategory ?? first(searchParams.category),
+    page: Number(first(searchParams.page)) || 1,
+  };
 }
 
 interface Props {
@@ -17,17 +32,16 @@ interface Props {
   // Set on /categories/[slug] — fixes the category and hides the category
   // selector from the filter bar (the route itself already picks it).
   fixedCategory?: string;
+  // /courses renders CourseFilters itself, in a left sidebar, sharing the
+  // same searchParams/basePath — set this so CourseListing doesn't render
+  // a second copy of the form.
+  showFilters?: boolean;
 }
 
 // Shared by /courses and /categories/[slug] so the search/filter/sort/
 // pagination logic exists in exactly one place.
-export async function CourseListing({ searchParams, basePath, fixedCategory }: Props) {
-  const q = first(searchParams.q);
-  const level = first(searchParams.level);
-  const accessType = first(searchParams.access_type);
-  const sort = first(searchParams.sort);
-  const category = fixedCategory ?? first(searchParams.category);
-  const page = Number(first(searchParams.page)) || 1;
+export async function CourseListing({ searchParams, basePath, fixedCategory, showFilters = true }: Props) {
+  const { q, level, access_type: accessType, sort, category, page } = parseCourseFilters(searchParams, fixedCategory);
 
   let categories;
   let result;
@@ -54,12 +68,14 @@ export async function CourseListing({ searchParams, basePath, fixedCategory }: P
 
   return (
     <>
-      <CourseFilters
-        categories={categories}
-        basePath={basePath}
-        current={{ q, category, level, access_type: accessType, sort }}
-        showCategoryFilter={!fixedCategory}
-      />
+      {showFilters && (
+        <CourseFilters
+          categories={categories}
+          basePath={basePath}
+          current={{ q, category, level, access_type: accessType, sort }}
+          showCategoryFilter={!fixedCategory}
+        />
+      )}
 
       {result.items.length === 0 ? (
         <div className="empty-state">
@@ -70,6 +86,9 @@ export async function CourseListing({ searchParams, basePath, fixedCategory }: P
         </div>
       ) : (
         <>
+          <p className="catalog-result-count">
+            Найдено {result.total} {pluralizeRu(result.total, "курс", "курса", "курсов")}
+          </p>
           <div className="course-grid">
             {result.items.map((course) => (
               <CourseCard

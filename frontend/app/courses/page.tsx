@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
-import { CourseListing } from "@/components/CourseListing";
-import { PublicShell } from "@/components/shell/PublicShell";
+import { CourseListing, parseCourseFilters } from "@/components/CourseListing";
+import { CourseFilters } from "@/components/CourseFilters";
+import { SidebarAccordion } from "@/components/shell/SidebarAccordion";
+import { getCategories } from "@/lib/api";
 
 export const metadata: Metadata = {
   title: "Курсы — LMS Platform",
@@ -19,12 +21,28 @@ export default async function CoursesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const categories = await getCategories().catch(() => []);
+  const { q, category, level, access_type, sort } = parseCourseFilters(params);
 
   return (
-    <PublicShell>
-      <h1>Курсы</h1>
-      <p className="subtitle">Каталог курсов по программированию, базам данных, DevOps и frontend-разработке.</p>
-      <CourseListing searchParams={params} basePath="/courses" />
-    </PublicShell>
+    <main className="public-shell">
+      <aside className="public-sidebar">
+        <SidebarAccordion title="Фильтры">
+          <CourseFilters
+            categories={categories}
+            basePath="/courses"
+            current={{ q, category, level, access_type, sort }}
+            showCategoryFilter
+            layout="sidebar"
+          />
+        </SidebarAccordion>
+      </aside>
+
+      <div className="public-main">
+        <h1>Курсы</h1>
+        <p className="subtitle">Каталог курсов по программированию, базам данных, DevOps и frontend-разработке.</p>
+        <CourseListing searchParams={params} basePath="/courses" showFilters={false} />
+      </div>
+    </main>
   );
 }

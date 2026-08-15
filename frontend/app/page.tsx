@@ -1,9 +1,25 @@
 import Link from "next/link";
 import { BackendStatus } from "@/components/BackendStatus";
-import { IconAward, IconCourses, IconSparkles } from "@/components/shell/icons";
+import {
+  IconAward,
+  IconBarChart,
+  IconClipboard,
+  IconCourses,
+  IconGraduationCap,
+  IconLayers,
+  IconUsers,
+} from "@/components/shell/icons";
 import { PublicShell } from "@/components/shell/PublicShell";
+import { CourseCard } from "@/components/CourseCard";
+import { SpecialityCard } from "@/components/SpecialityCard";
+import { getCourses, getSpecialities } from "@/lib/api";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const [popularCourses, specialities] = await Promise.all([
+    getCourses({ sort: "rating", limit: 6 }).catch(() => null),
+    getSpecialities().catch(() => []),
+  ]);
+
   return (
     <PublicShell>
       <div className="hero">
@@ -25,29 +41,98 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div className="value-grid">
-        <div className="value-card">
-          <div className="value-icon">
-            <IconCourses size={20} />
-          </div>
-          <h3>Структурированные курсы</h3>
-          <p>Модули, уроки, практика и итоговые тесты — понятный путь от новичка до профи.</p>
+      <section className="home-section">
+        <div className="section-header">
+          <h2>Популярные курсы</h2>
+          <Link href="/courses" className="nav-link">
+            Все курсы →
+          </Link>
         </div>
-        <div className="value-card">
-          <div className="value-icon">
-            <IconSparkles size={20} />
+        {popularCourses && popularCourses.items.length > 0 ? (
+          <div className="course-grid">
+            {popularCourses.items.map((course) => (
+              <CourseCard key={course.id} course={course} />
+            ))}
           </div>
-          <h3>Персональные рекомендации</h3>
-          <p>Подбираем курсы под ваш прогресс, интересы и выбранную специальность.</p>
+        ) : (
+          <p className="subtitle">Курсы скоро появятся здесь.</p>
+        )}
+      </section>
+
+      <section className="home-section">
+        <div className="section-header">
+          <h2>Специальности</h2>
+          <Link href="/specialities" className="nav-link">
+            Все специальности →
+          </Link>
         </div>
-        <div className="value-card">
-          <div className="value-icon">
-            <IconAward size={20} />
+        {specialities.length > 0 ? (
+          <div className="speciality-grid">
+            {specialities.map((s) => (
+              <SpecialityCard key={s.id} speciality={s} />
+            ))}
           </div>
-          <h3>Сертификаты</h3>
-          <p>Подтверждайте пройденные курсы официальным сертификатом с уникальным номером.</p>
+        ) : (
+          <p className="subtitle">Специальности скоро появятся здесь.</p>
+        )}
+      </section>
+
+      <section className="home-section">
+        <h2>Почему выбирают нашу платформу</h2>
+        <div className="value-grid">
+          <div className="value-card">
+            <div className="value-icon">
+              <IconLayers size={20} />
+            </div>
+            <h3>Структурированные курсы</h3>
+            <p>Модули, уроки, практика и итоговые тесты — понятный путь от новичка до профи.</p>
+          </div>
+          <div className="value-card">
+            <div className="value-icon">
+              <IconClipboard size={20} />
+            </div>
+            <h3>Практические задания</h3>
+            <p>Код-упражнения и домашние работы с проверкой — не только теория.</p>
+          </div>
+          <div className="value-card">
+            <div className="value-icon">
+              <IconBarChart size={20} />
+            </div>
+            <h3>Отслеживание прогресса</h3>
+            <p>Видите, сколько уроков пройдено и что осталось до завершения курса.</p>
+          </div>
+          <div className="value-card">
+            <div className="value-icon">
+              <IconAward size={20} />
+            </div>
+            <h3>Сертификаты</h3>
+            <p>Подтверждайте пройденные курсы официальным сертификатом с уникальным номером.</p>
+          </div>
+          <div className="value-card">
+            <div className="value-icon">
+              <IconGraduationCap size={20} />
+            </div>
+            <h3>Roadmap по специальностям</h3>
+            <p>Последовательный путь из нескольких курсов к конкретной IT-профессии.</p>
+          </div>
+          <div className="value-card">
+            <div className="value-icon">
+              <IconUsers size={20} />
+            </div>
+            <h3>Опытные преподаватели</h3>
+            <p>Курсы ведут практикующие специалисты, а не просто дикторы текста.</p>
+          </div>
         </div>
-      </div>
+      </section>
+
+      <section className="home-cta">
+        <IconCourses size={26} />
+        <h2>Готовы начать учиться?</h2>
+        <p className="subtitle">Выберите специальность или курс и сделайте первый шаг уже сегодня.</p>
+        <Link href="/register" className="btn-primary">
+          Начать бесплатно →
+        </Link>
+      </section>
     </PublicShell>
   );
 }

@@ -15,6 +15,7 @@ import { Rating } from "@/components/Rating";
 import { ReviewForm } from "@/components/ReviewForm";
 import { WishlistButton } from "@/components/WishlistButton";
 import { RecommendationCard } from "@/components/RecommendationCard";
+import { IconUser } from "@/components/shell/icons";
 
 export default async function CourseDetailPage({
   params,
@@ -62,116 +63,140 @@ export default async function CourseDetailPage({
   const canReview = Boolean(myCourse && (myCourse.completed || myCourse.completed_lessons > 0));
 
   return (
-    <main>
-      <Link href="/courses">← Все курсы</Link>
+    <main className="course-detail-shell">
+      <nav className="breadcrumbs" aria-label="Хлебные крошки">
+        <Link href="/">Главная</Link>
+        <span>/</span>
+        <Link href="/courses">Курсы</Link>
+        {course.category_name && course.category_slug && (
+          <>
+            <span>/</span>
+            <Link href={`/categories/${course.category_slug}`}>{course.category_name}</Link>
+          </>
+        )}
+        <span>/</span>
+        <span>{course.title}</span>
+      </nav>
 
-      <div className="course-hero">
-        <div className="course-hero-badges">
-          {course.category_name && course.category_slug && (
-            <Link href={`/categories/${course.category_slug}`} className="badge badge-category">
-              {course.category_name}
-            </Link>
-          )}
-          <span className="badge">{course.level}</span>
-          <span className={`badge ${isPremium ? "badge-premium" : "badge-free"}`}>
-            {isPremium ? "По подписке" : "Бесплатный"}
-          </span>
-        </div>
+      <div className="course-detail-layout">
+        <div className="course-detail-main">
+          <div className="course-hero">
+            <div className="course-hero-badges">
+              {course.category_name && course.category_slug && (
+                <Link href={`/categories/${course.category_slug}`} className="badge badge-category">
+                  {course.category_name}
+                </Link>
+              )}
+              <span className="badge">{course.level}</span>
+              <span className={`badge ${isPremium ? "badge-premium" : "badge-free"}`}>
+                {isPremium ? "По подписке" : "Бесплатный"}
+              </span>
+            </div>
 
-        <h1>{course.title}</h1>
+            <h1>{course.title}</h1>
 
-        <div className="rating-summary">
-          <span className="rating-average">{course.rating_average.toFixed(1)}</span>
-          <Rating average={course.rating_average} count={course.rating_count} />
-        </div>
+            <div className="rating-summary">
+              <span className="rating-average">{course.rating_average.toFixed(1)}</span>
+              <Rating average={course.rating_average} count={course.rating_count} />
+            </div>
 
-        <p className="course-hero-description">{course.description}</p>
+            {course.instructor_name && (
+              <p className="course-hero-instructor">
+                <IconUser size={15} /> Преподаватель: {course.instructor_name}
+              </p>
+            )}
 
-        <div className="enroll-cta">
-          {!token && (
-            <Link href="/login" className="nav-link">
-              Войдите, чтобы начать обучение
-            </Link>
-          )}
-          {token && myCourse && (
-            <Link href="/dashboard/courses" className="btn-primary">
-              Продолжить обучение ({myCourse.progress_percent}%)
-            </Link>
-          )}
-          {token && !myCourse && !hasAccess && (
-            <Link href="/pricing" className="btn-primary">
-              Оформить подписку
-            </Link>
-          )}
-          {token && !myCourse && hasAccess && (
-            <form action={enrollAction.bind(null, id)}>
-              <button type="submit" className="btn-primary">
-                Начать обучение
-              </button>
-            </form>
-          )}
-          {/* Wishlist stays available even once enrolled/completed — only
-              successful enrollment auto-clears it (Stage 18 item 20), the
-              student can still add/remove freely otherwise. */}
-          {token && (
-            <span className="wishlist-inline">
-              <WishlistButton courseId={id} initialInWishlist={wishlistIds.includes(id)} />
-            </span>
-          )}
-        </div>
-      </div>
-
-      <h2>Программа курса</h2>
-      {course.modules.length === 0 && <p>Модули пока не добавлены.</p>}
-
-      {course.modules.map((module) => (
-        <section key={module.id} className="module">
-          <h3>{module.title}</h3>
-          <ul className="lesson-list">
-            {module.lessons.map((lesson) => (
-              <li key={lesson.id}>
-                {lesson.title}
-                {lesson.is_free && <span className="badge badge-free">бесплатно</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-
-      <h2>Отзывы</h2>
-
-      {canReview && <ReviewForm courseId={id} myReview={myReview} />}
-      {token && myCourse && !canReview && (
-        <p className="subtitle">Оставить отзыв можно после прохождения хотя бы одного урока курса.</p>
-      )}
-
-      {!reviews || reviews.items.length === 0 ? (
-        <p>Отзывов пока нет.</p>
-      ) : (
-        <ul className="review-list">
-          {reviews.items.map((review) => (
-            <li key={review.id} className="review-item">
-              <div className="review-item-header">
-                <span className="review-author">{review.display_name}</span>
-                <span className="review-date">{new Date(review.created_at).toLocaleDateString("ru-RU")}</span>
-              </div>
-              <span className="rating">{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span>
-              {review.review_text && <p className="review-text">{review.review_text}</p>}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {similarCourses.length > 0 && (
-        <>
-          <h2 className="mt-3">Похожие курсы</h2>
-          <div className="course-grid">
-            {similarCourses.map((rec) => (
-              <RecommendationCard key={rec.course_id} rec={rec} />
-            ))}
+            <p className="course-hero-description">{course.description}</p>
           </div>
-        </>
-      )}
+
+          <h2>Программа курса</h2>
+          {course.modules.length === 0 && <p>Модули пока не добавлены.</p>}
+
+          {course.modules.map((module) => (
+            <section key={module.id} className="module">
+              <h3>{module.title}</h3>
+              <ul className="lesson-list">
+                {module.lessons.map((lesson) => (
+                  <li key={lesson.id}>
+                    {lesson.title}
+                    {lesson.is_free && <span className="badge badge-free">бесплатно</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+
+          <h2>Отзывы</h2>
+
+          {canReview && <ReviewForm courseId={id} myReview={myReview} />}
+          {token && myCourse && !canReview && (
+            <p className="subtitle">Оставить отзыв можно после прохождения хотя бы одного урока курса.</p>
+          )}
+
+          {!reviews || reviews.items.length === 0 ? (
+            <p>Отзывов пока нет.</p>
+          ) : (
+            <ul className="review-list">
+              {reviews.items.map((review) => (
+                <li key={review.id} className="review-item">
+                  <div className="review-item-header">
+                    <span className="review-author">{review.display_name}</span>
+                    <span className="review-date">{new Date(review.created_at).toLocaleDateString("ru-RU")}</span>
+                  </div>
+                  <span className="rating">{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span>
+                  {review.review_text && <p className="review-text">{review.review_text}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {similarCourses.length > 0 && (
+            <>
+              <h2 className="mt-3">Похожие курсы</h2>
+              <div className="course-grid">
+                {similarCourses.map((rec) => (
+                  <RecommendationCard key={rec.course_id} rec={rec} />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <aside className="course-detail-aside">
+          <div className="enroll-card">
+            {!token && (
+              <Link href="/login" className="btn-primary">
+                Войдите, чтобы начать обучение
+              </Link>
+            )}
+            {token && myCourse && (
+              <Link href="/dashboard/courses" className="btn-primary">
+                Продолжить обучение ({myCourse.progress_percent}%)
+              </Link>
+            )}
+            {token && !myCourse && !hasAccess && (
+              <Link href="/pricing" className="btn-primary">
+                Оформить подписку
+              </Link>
+            )}
+            {token && !myCourse && hasAccess && (
+              <form action={enrollAction.bind(null, id)}>
+                <button type="submit" className="btn-primary" style={{ width: "100%" }}>
+                  Начать обучение
+                </button>
+              </form>
+            )}
+            {/* Wishlist stays available even once enrolled/completed — only
+                successful enrollment auto-clears it (Stage 18 item 20), the
+                student can still add/remove freely otherwise. */}
+            {token && (
+              <span className="wishlist-inline">
+                <WishlistButton courseId={id} initialInWishlist={wishlistIds.includes(id)} />
+              </span>
+            )}
+          </div>
+        </aside>
+      </div>
     </main>
   );
 }

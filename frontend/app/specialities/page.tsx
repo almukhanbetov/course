@@ -25,7 +25,7 @@ export default async function SpecialitiesPage() {
       {error && <p role="alert">Не удалось загрузить специальности: {error}</p>}
       {!error && specialities.length === 0 && <p>Специальностей пока нет.</p>}
 
-      <div className="course-grid">
+      <div className="speciality-grid">
         {specialities.map((speciality) => (
           <SpecialityCard key={speciality.id} speciality={speciality} />
         ))}

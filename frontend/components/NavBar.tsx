@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { PublicUser } from "@/lib/api";
 import { logoutAction } from "@/lib/actions";
-import { IconBell } from "@/components/shell/icons";
+import { IconBell, IconSearch } from "@/components/shell/icons";
+import { NavBarMobileMenu } from "@/components/NavBarMobileMenu";
 
 export function NavBar({ user, unreadCount = 0 }: { user: PublicUser | null; unreadCount?: number }) {
   const initials = user ? `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase() : "";
@@ -13,7 +14,11 @@ export function NavBar({ user, unreadCount = 0 }: { user: PublicUser | null; unr
           <span className="navbar-brand-mark">LMS</span>
           LMS Platform
         </Link>
-        <div className="navbar-links">
+        <NavBarMobileMenu>
+          <form action="/courses" method="GET" className="navbar-search">
+            <IconSearch size={16} />
+            <input type="search" name="q" placeholder="Поиск курсов..." aria-label="Поиск курсов" />
+          </form>
           <Link href="/courses">Курсы</Link>
           <Link href="/specialities">Специальности</Link>
           <Link href="/pricing">Тарифы</Link>
@@ -45,7 +50,7 @@ export function NavBar({ user, unreadCount = 0 }: { user: PublicUser | null; unr
               </Link>
             </>
           )}
-        </div>
+        </NavBarMobileMenu>
       </div>
     </nav>
   );

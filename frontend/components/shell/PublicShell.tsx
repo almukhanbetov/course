@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getSpecialities } from "@/lib/api";
+import { SidebarAccordion } from "@/components/shell/SidebarAccordion";
 
 // Shared wide layout for public marketing/catalog pages (/, /courses,
 // /specialities): a left sidebar of specialities plus a main content column.
@@ -15,17 +16,19 @@ export async function PublicShell({ children }: { children: React.ReactNode }) {
   return (
     <main className="public-shell">
       <aside className="public-sidebar">
-        <p className="public-sidebar-title">IT-специальности</p>
-        <nav className="public-sidebar-nav">
-          {specialities.map((s) => (
-            <Link key={s.id} href={`/specialities/${s.slug}`}>
-              {s.title}
-            </Link>
-          ))}
-        </nav>
-        <Link href="/specialities" className="public-sidebar-all">
-          Все специальности →
-        </Link>
+        <SidebarAccordion title="IT-специальности">
+          <nav className="public-sidebar-nav">
+            {specialities.map((s) => (
+              <Link key={s.id} href={`/specialities/${s.slug}`}>
+                {s.title}
+              </Link>
+            ))}
+            {specialities.length === 0 && <p className="public-sidebar-empty">Специальностей пока нет.</p>}
+          </nav>
+          <Link href="/specialities" className="public-sidebar-all">
+            Все специальности →
+          </Link>
+        </SidebarAccordion>
       </aside>
 
       <div className="public-main">{children}</div>
