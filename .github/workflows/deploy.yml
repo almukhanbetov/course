@@ -83,13 +83,40 @@ jobs:
       # verified against a pre-recorded fingerprint. Weaker than pinning —
       # see STAGE28_PROGRESS.md's known limitations for the trade-off and
       # how to strengthen it later (a PROD_VPS_KNOWN_HOSTS secret).
+      #
+      # Retried: a bare single attempt was observed to fail closed on a
+      # transient network blip between the runner and the VPS (no firewall/
+      # DNS misconfiguration — an immediate re-run of the same job, same
+      # secrets, succeeded). ssh-keyscan itself has no built-in retry, so
+      # this loop gives a handful of short-spaced attempts before failing
+      # the job for real, same "retry a few times, then fail closed"
+      # pattern as the health checks below.
       - name: Trust the VPS host key (TOFU)
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
+          for i in $(seq 1 5); do
+            if ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts; then
+              break
+            fi
+            echo "ssh-keyscan attempt $i/5 failed"
+            if [ "$i" = 5 ]; then
+              echo "ssh-keyscan did not succeed after 5 attempts"
+              exit 1
+            fi
+            sleep 5
+          done
 
       - name: Verify SSH connectivity
-        run: ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "echo connected"
+        run: |
+          for i in $(seq 1 5); do
+            if ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "echo connected"; then
+              exit 0
+            fi
+            echo "SSH connectivity attempt $i/5 failed"
+            sleep 5
+          done
+          echo "could not establish SSH connectivity after 5 attempts"
+          exit 1
 
       - name: Sync compose files and migrations to the VPS
         run: |
