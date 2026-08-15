@@ -374,36 +374,80 @@ p {
 }
 
 .locale-switcher {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
+  position: relative;
   flex-shrink: 0;
 }
 
-.locale-switcher-btn {
-  border: none;
-  background: none;
+.locale-switcher-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 38px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  padding: 0.3rem 0.55rem;
-  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+
+.locale-switcher-trigger:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.locale-switcher-chevron {
+  transition: transform 0.15s var(--ease);
+}
+
+.locale-switcher-chevron.open {
+  transform: rotate(180deg);
+}
+
+.locale-switcher-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  margin: 0;
+  padding: 0.35rem;
+  min-width: 160px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.locale-switcher-item {
+  display: block;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-weight: 500;
+  text-align: left;
   cursor: pointer;
   transition: background 0.15s var(--ease), color 0.15s var(--ease);
 }
 
-.locale-switcher-btn:hover {
+.locale-switcher-item:hover {
+  background: var(--surface-hover);
   color: var(--text);
 }
 
-.locale-switcher-btn.active {
-  background: var(--accent-soft);
+.locale-switcher-item.active {
   color: var(--accent);
+  font-weight: 700;
+  background: var(--accent-soft);
 }
 
 .bell-badge {
