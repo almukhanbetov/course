@@ -2,14 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { getHealth, type HealthStatus } from "@/lib/api";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import type { Locale } from "@/lib/i18n/locale";
 
 type State =
   | { kind: "loading" }
   | { kind: "ready"; data: HealthStatus }
   | { kind: "error"; message: string };
 
-export function BackendStatus() {
+export function BackendStatus({ locale }: { locale: Locale }) {
   const [state, setState] = useState<State>({ kind: "loading" });
+  const dict = getDictionary(locale).backendStatus;
 
   useEffect(() => {
     let cancelled = false;
@@ -33,16 +36,12 @@ export function BackendStatus() {
   }, []);
 
   if (state.kind === "loading") {
-    return <p>Проверка соединения с backend...</p>;
+    return <p>{dict.checking}</p>;
   }
 
   if (state.kind === "error") {
-    return <p role="alert">Backend недоступен: {state.message}</p>;
+    return <p role="alert">{dict.unavailable(state.message)}</p>;
   }
 
-  return (
-    <p>
-      Backend: {state.data.status} · База данных: {state.data.database}
-    </p>
-  );
+  return <p>{dict.ready(state.data.status, state.data.database)}</p>;
 }

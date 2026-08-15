@@ -6,7 +6,8 @@ import { CourseFilters } from "@/components/CourseFilters";
 import { CoursePagination } from "@/components/CoursePagination";
 import { ErrorState } from "@/components/shell/ErrorState";
 import { IconCourses } from "@/components/shell/icons";
-import { pluralizeRu } from "@/lib/pluralize";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import type { Locale } from "@/lib/i18n/locale";
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -31,6 +32,7 @@ export function parseCourseFilters(searchParams: SearchParams, fixedCategory?: s
 interface Props {
   searchParams: SearchParams;
   basePath: string;
+  locale: Locale;
   // Set on /categories/[slug] — fixes the category and hides the category
   // selector from the filter bar (the route itself already picks it).
   fixedCategory?: string;
@@ -42,8 +44,9 @@ interface Props {
 
 // Shared by /courses and /categories/[slug] so the search/filter/sort/
 // pagination logic exists in exactly one place.
-export async function CourseListing({ searchParams, basePath, fixedCategory, showFilters = true }: Props) {
+export async function CourseListing({ searchParams, basePath, locale, fixedCategory, showFilters = true }: Props) {
   const { q, level, access_type: accessType, sort, category, page } = parseCourseFilters(searchParams, fixedCategory);
+  const dict = getDictionary(locale).courses;
 
   let categories;
   let result;
@@ -58,7 +61,7 @@ export async function CourseListing({ searchParams, basePath, fixedCategory, sho
   }
 
   if (loadError || !result || !categories) {
-    return <ErrorState message="Не удалось загрузить курсы. Попробуйте позже." />;
+    return <ErrorState message={dict.errorLoad} />;
   }
 
   // Wishlist is a second, authenticated-only enrichment call (item 3) —
@@ -76,34 +79,40 @@ export async function CourseListing({ searchParams, basePath, fixedCategory, sho
           basePath={basePath}
           current={{ q, category, level, access_type: accessType, sort }}
           showCategoryFilter={!fixedCategory}
+          locale={locale}
         />
       )}
 
       {result.items.length === 0 ? (
         <div className="empty-state">
           <IconCourses size={26} />
-          <p className="empty-state-title">Курсы не найдены</p>
-          <p className="empty-state-text">Попробуйте изменить фильтры или сбросить их.</p>
+          <p className="empty-state-title">{dict.emptyTitle}</p>
+          <p className="empty-state-text">{dict.emptyText}</p>
           <Link href={basePath} className="btn-secondary">
-            Сбросить фильтры
+            {dict.resetFilters}
           </Link>
         </div>
       ) : (
         <>
-          <p className="catalog-result-count">
-            Найдено {result.total} {pluralizeRu(result.total, "курс", "курса", "курсов")}
-          </p>
+          <p className="catalog-result-count">{dict.resultCount(result.total)}</p>
           <div className="course-grid">
             {result.items.map((course) => (
               <CourseCard
                 key={course.id}
                 course={course}
+                locale={locale}
                 showWishlist={Boolean(token)}
                 initialInWishlist={wishlistSet.has(course.id)}
               />
             ))}
           </div>
-          <CoursePagination basePath={basePath} searchParams={searchParams} page={result.page} totalPages={result.total_pages} />
+          <CoursePagination
+            basePath={basePath}
+            searchParams={searchParams}
+            page={result.page}
+            totalPages={result.total_pages}
+            locale={locale}
+          />
         </>
       )}
     </>

@@ -4,6 +4,7 @@ import "./globals.css";
 import { NavBar } from "@/components/NavBar";
 import { getCurrentUser, getSessionToken } from "@/lib/session";
 import { getUnreadNotificationCount } from "@/lib/api";
+import { getLocale } from "@/lib/i18n/getLocale";
 
 const inter = Inter({ subsets: ["latin", "cyrillic"], variable: "--font-sans", display: "swap" });
 
@@ -20,9 +21,10 @@ export default async function RootLayout({
   const user = await getCurrentUser();
   const token = await getSessionToken();
   const unreadCount = user && token ? await getUnreadNotificationCount(token) : 0;
+  const locale = await getLocale();
 
   return (
-    <html lang="ru" className={inter.variable} suppressHydrationWarning>
+    <html lang={locale} className={inter.variable} suppressHydrationWarning>
       <body>
         {/* Sets data-theme on <html> before the rest of the body paints, so
             a light-theme visitor never sees a flash of the dark theme.
@@ -35,7 +37,7 @@ export default async function RootLayout({
           }}
         />
         <div className="page-shell">
-          <NavBar user={user} unreadCount={unreadCount} />
+          <NavBar user={user} unreadCount={unreadCount} locale={locale} />
           {children}
         </div>
       </body>

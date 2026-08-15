@@ -3,6 +3,8 @@ import { CourseListing, parseCourseFilters } from "@/components/CourseListing";
 import { CourseFilters } from "@/components/CourseFilters";
 import { SidebarAccordion } from "@/components/shell/SidebarAccordion";
 import { getCategories } from "@/lib/api";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import { getLocale } from "@/lib/i18n/getLocale";
 
 export const metadata: Metadata = {
   title: "Курсы — LMS Platform",
@@ -21,30 +23,33 @@ export default async function CoursesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const locale = await getLocale();
+  const dict = getDictionary(locale).courses;
   const categories = await getCategories().catch(() => []);
   const { q, category, level, access_type, sort } = parseCourseFilters(params);
 
   return (
     <main className="public-shell">
       <aside className="public-sidebar">
-        <SidebarAccordion title="Фильтры">
+        <SidebarAccordion title={dict.filtersTitle}>
           <CourseFilters
             categories={categories}
             basePath="/courses"
             current={{ q, category, level, access_type, sort }}
             showCategoryFilter
             layout="sidebar"
+            locale={locale}
           />
         </SidebarAccordion>
       </aside>
 
       <div className="public-main">
         <div className="catalog-intro">
-          <p className="section-eyebrow">Каталог</p>
-          <h1>Курсы</h1>
-          <p className="subtitle">Каталог курсов по программированию, базам данных, DevOps и frontend-разработке.</p>
+          <p className="section-eyebrow">{dict.eyebrow}</p>
+          <h1>{dict.title}</h1>
+          <p className="subtitle">{dict.subtitle}</p>
         </div>
-        <CourseListing searchParams={params} basePath="/courses" showFilters={false} />
+        <CourseListing searchParams={params} basePath="/courses" showFilters={false} locale={locale} />
       </div>
     </main>
   );

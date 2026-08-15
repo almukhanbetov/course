@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCourseSuggestions, type CourseSuggestion } from "@/lib/api";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import type { Locale } from "@/lib/i18n/locale";
 
 const DEBOUNCE_MS = 250;
 
@@ -13,8 +15,9 @@ const DEBOUNCE_MS = 250;
 // full-page-navigation search this form was built around — autocomplete is
 // additive, not a replacement for that flow (Stage 22B1 scope: enhance the
 // existing input, don't redesign the courses page).
-export function SearchAutocomplete({ defaultValue }: { defaultValue: string }) {
+export function SearchAutocomplete({ defaultValue, locale }: { defaultValue: string; locale: Locale }) {
   const router = useRouter();
+  const dict = getDictionary(locale).courses;
   const [value, setValue] = useState(defaultValue);
   const [suggestions, setSuggestions] = useState<CourseSuggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -134,8 +137,8 @@ export function SearchAutocomplete({ defaultValue }: { defaultValue: string }) {
       <input
         type="search"
         name="q"
-        placeholder="Поиск по курсам..."
-        aria-label="Поиск"
+        placeholder={dict.searchPlaceholder}
+        aria-label={dict.searchAriaLabel}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
@@ -151,10 +154,10 @@ export function SearchAutocomplete({ defaultValue }: { defaultValue: string }) {
         <ul id="search-autocomplete-list" className="search-autocomplete-dropdown" role="listbox">
           {loading ? (
             <li className="search-autocomplete-status" aria-live="polite">
-              Загрузка...
+              {dict.searchLoading}
             </li>
           ) : suggestions.length === 0 ? (
-            <li className="search-autocomplete-status">Ничего не найдено</li>
+            <li className="search-autocomplete-status">{dict.searchNoResults}</li>
           ) : (
             suggestions.map((s, i) => (
               <li key={s.id} role="option" aria-selected={i === highlighted}>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getCategories } from "@/lib/api";
 import { CourseListing } from "@/components/CourseListing";
+import { DEFAULT_LOCALE } from "@/lib/i18n/locale";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -43,7 +44,12 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
     <main>
       <h1>{category.name}</h1>
       {category.description && <p className="subtitle">{category.description}</p>}
-      <CourseListing searchParams={search} basePath={`/categories/${category.slug}`} fixedCategory={category.slug} />
+      <CourseListing
+        searchParams={search}
+        basePath={`/categories/${category.slug}`}
+        fixedCategory={category.slug}
+        locale={DEFAULT_LOCALE}
+      />
     </main>
   );
 }

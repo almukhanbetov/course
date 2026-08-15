@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import type { Locale } from "@/lib/i18n/locale";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -20,29 +22,30 @@ export function CoursePagination({
   searchParams,
   page,
   totalPages,
+  locale,
 }: {
   basePath: string;
   searchParams: SearchParams;
   page: number;
   totalPages: number;
+  locale: Locale;
 }) {
   if (totalPages <= 1) return null;
+  const dict = getDictionary(locale).courses;
 
   return (
-    <nav className="pagination" aria-label="Пагинация">
+    <nav className="pagination" aria-label={dict.paginationLabel}>
       {page > 1 ? (
         <Link href={buildHref(basePath, searchParams, page - 1)} className="btn-secondary">
-          ← Назад
+          {dict.paginationPrev}
         </Link>
       ) : (
         <span />
       )}
-      <span>
-        Страница {page} из {totalPages}
-      </span>
+      <span>{dict.paginationPage(page, totalPages)}</span>
       {page < totalPages ? (
         <Link href={buildHref(basePath, searchParams, page + 1)} className="btn-secondary">
-          Вперёд →
+          {dict.paginationNext}
         </Link>
       ) : (
         <span />

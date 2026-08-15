@@ -10,7 +10,21 @@ export interface HealthStatus {
   database: string;
 }
 
-export interface Course {
+// title/description (or name) stay the canonical, always-present Russian
+// fields; these are optional per-locale overrides the backend returns only
+// where a real translation exists — see lib/i18n/localize.ts for how the
+// frontend picks the right one with a fallback to Russian.
+export interface LocalizedTitle {
+  title_kk?: string;
+  title_en?: string;
+}
+
+export interface LocalizedDescription {
+  description_kk?: string;
+  description_en?: string;
+}
+
+export interface Course extends LocalizedTitle, LocalizedDescription {
   id: string;
   title: string;
   slug: string;
@@ -41,6 +55,8 @@ export interface Category {
   active: boolean;
   created_at: string;
   updated_at: string;
+  name_kk?: string;
+  name_en?: string;
 }
 
 export interface CourseListParams {
@@ -202,7 +218,7 @@ export interface LessonProgress {
   completed_at?: string;
 }
 
-export interface Speciality {
+export interface Speciality extends LocalizedTitle, LocalizedDescription {
   id: string;
   title: string;
   slug: string;
@@ -213,7 +229,7 @@ export interface Speciality {
   updated_at: string;
 }
 
-export interface SpecialityCourse {
+export interface SpecialityCourse extends LocalizedTitle, LocalizedDescription {
   id: string;
   title: string;
   slug: string;

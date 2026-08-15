@@ -4,6 +4,9 @@ import { Rating } from "@/components/Rating";
 import { WishlistButton } from "@/components/WishlistButton";
 import { IconUser } from "@/components/shell/icons";
 import { getCategoryVisual } from "@/lib/categoryVisuals";
+import { getDictionary, localizeLevel } from "@/lib/i18n/dictionaries";
+import { localizeDescription, localizeTitle } from "@/lib/i18n/localize";
+import type { Locale } from "@/lib/i18n/locale";
 
 // Wishlist is a sibling of the navigational Link, not nested inside it —
 // a <button> inside an <a> is both invalid HTML and would double-fire
@@ -12,14 +15,17 @@ import { getCategoryVisual } from "@/lib/categoryVisuals";
 // without the toggle — see CourseListing).
 export function CourseCard({
   course,
+  locale,
   showWishlist = false,
   initialInWishlist = false,
 }: {
   course: Course;
+  locale: Locale;
   showWishlist?: boolean;
   initialInWishlist?: boolean;
 }) {
   const { Icon: PlaceholderIcon, accent } = getCategoryVisual(course.category_slug);
+  const dict = getDictionary(locale);
 
   return (
     <div className="course-card">
@@ -41,17 +47,17 @@ export function CourseCard({
             category, then level. */}
         <div className="course-card-badges">
           <span className={`badge ${course.access_type === "free" ? "badge-free" : "badge-premium"}`}>
-            {course.access_type === "free" ? "Бесплатный" : "По подписке"}
+            {course.access_type === "free" ? dict.courses.accessFree : dict.courses.accessSubscription}
           </span>
           {course.category_name && <span className="badge badge-category">{course.category_name}</span>}
-          <span className="badge">{course.level}</span>
+          <span className="badge">{localizeLevel(course.level, dict)}</span>
         </div>
 
-        <h2>{course.title}</h2>
-        <p className="course-card-description">{course.description}</p>
+        <h2>{localizeTitle(course, locale)}</h2>
+        <p className="course-card-description">{localizeDescription(course, locale)}</p>
 
         <div className="course-card-footer">
-          <Rating average={course.rating_average} count={course.rating_count} />
+          <Rating average={course.rating_average} count={course.rating_count} locale={locale} />
           {course.instructor_name && (
             <span className="course-card-instructor">
               <IconUser size={14} />

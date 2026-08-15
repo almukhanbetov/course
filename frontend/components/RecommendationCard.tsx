@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { reasonLabel, type Recommendation } from "@/lib/api";
 import { Rating } from "@/components/Rating";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/locale";
 
 // Optional feedback controls (Stage 23B1) — only the personalized
 // /dashboard grid passes this prop (via PersonalizedRecommendations);
@@ -29,8 +31,17 @@ export interface RecommendationFeedbackProps {
 // <button> nested inside an <a> is invalid HTML and would double-fire
 // navigation on click. This is a structural fix reused from an existing
 // pattern, not a redesign — the rendered content/fields are unchanged.
-export function RecommendationCard({ rec, feedback }: { rec: Recommendation; feedback?: RecommendationFeedbackProps }) {
+export function RecommendationCard({
+  rec,
+  feedback,
+  locale = DEFAULT_LOCALE,
+}: {
+  rec: Recommendation;
+  feedback?: RecommendationFeedbackProps;
+  locale?: Locale;
+}) {
   const primaryReason = rec.reasons[0];
+  const dict = getDictionary(locale);
 
   return (
     <div className="course-card recommendation-card">
@@ -47,15 +58,15 @@ export function RecommendationCard({ rec, feedback }: { rec: Recommendation; fee
 
       <Link href={`/courses/${rec.course_id}`} className="course-card-link">
         <div className="course-card-image">
-          {rec.image_url ? <img src={rec.image_url} alt="" /> : "Нет изображения"}
+          {rec.image_url ? <img src={rec.image_url} alt="" /> : dict.common.noImage}
         </div>
         <h3>{rec.title}</h3>
         {rec.category_name && <span className="badge badge-category">{rec.category_name}</span>}{" "}
         <span className={`badge ${rec.access_type === "free" ? "badge-free" : "badge-premium"}`}>
-          {rec.access_type === "free" ? "Бесплатный" : "По подписке"}
+          {rec.access_type === "free" ? dict.common.free : dict.common.subscription}
         </span>
         <div className="course-card-rating">
-          <Rating average={rec.rating_average} count={rec.rating_count} />
+          <Rating average={rec.rating_average} count={rec.rating_count} locale={locale} />
         </div>
         {primaryReason && <p className="recommendation-reason">{reasonLabel(primaryReason, rec.category_name)}</p>}
       </Link>

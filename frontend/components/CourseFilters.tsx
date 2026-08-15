@@ -1,12 +1,16 @@
 import type { Category } from "@/lib/api";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 import { IconBarChart, IconSearch, IconShield, IconSort, IconTag } from "@/components/shell/icons";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import { localizeName } from "@/lib/i18n/localize";
+import type { Locale } from "@/lib/i18n/locale";
 
 interface Props {
   categories: Category[];
   basePath: string;
   current: { q: string; category: string; level: string; access_type: string; sort: string };
   showCategoryFilter: boolean;
+  locale: Locale;
   // "bar": original horizontal single-row form (default, used by
   // /categories/[slug]). "sidebar": same fields/form, stacked vertically
   // with labels for the /courses left filter panel.
@@ -19,8 +23,9 @@ interface Props {
 // by SearchAutocomplete (Stage 22B1) with a suggestions dropdown, but stays
 // inside this same form under the same name="q" — submitting still works
 // exactly as before, autocomplete is purely additive.
-export function CourseFilters({ categories, basePath, current, showCategoryFilter, layout = "bar" }: Props) {
+export function CourseFilters({ categories, basePath, current, showCategoryFilter, locale, layout = "bar" }: Props) {
   const sidebar = layout === "sidebar";
+  const dict = getDictionary(locale).courses;
   const field = (label: string, control: React.ReactNode, icon?: React.ReactNode) =>
     sidebar ? (
       <label className="filter-field">
@@ -36,16 +41,16 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
 
   return (
     <form action={basePath} method="GET" className={sidebar ? "filter-bar filter-bar-sidebar" : "filter-bar"}>
-      {field("Поиск", <SearchAutocomplete defaultValue={current.q} />, <IconSearch size={14} />)}
+      {field(dict.searchLabel, <SearchAutocomplete defaultValue={current.q} locale={locale} />, <IconSearch size={14} />)}
 
       {showCategoryFilter &&
         field(
-          "Категория",
-          <select name="category" defaultValue={current.category} aria-label="Категория">
-            <option value="">Все категории</option>
+          dict.categoryLabel,
+          <select name="category" defaultValue={current.category} aria-label={dict.categoryLabel}>
+            <option value="">{dict.allCategories}</option>
             {categories.map((c) => (
               <option key={c.id} value={c.slug}>
-                {c.name}
+                {localizeName(c, locale)}
               </option>
             ))}
           </select>,
@@ -53,40 +58,40 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
         )}
 
       {field(
-        "Уровень",
-        <select name="level" defaultValue={current.level} aria-label="Уровень">
-          <option value="">Любой уровень</option>
-          <option value="beginner">Начальный</option>
-          <option value="intermediate">Средний</option>
-          <option value="advanced">Продвинутый</option>
+        dict.levelLabel,
+        <select name="level" defaultValue={current.level} aria-label={dict.levelLabel}>
+          <option value="">{dict.anyLevel}</option>
+          <option value="beginner">{dict.levelBeginner}</option>
+          <option value="intermediate">{dict.levelIntermediate}</option>
+          <option value="advanced">{dict.levelAdvanced}</option>
         </select>,
         <IconBarChart size={14} />
       )}
 
       {field(
-        "Доступ",
-        <select name="access_type" defaultValue={current.access_type} aria-label="Доступ">
-          <option value="">Любой доступ</option>
-          <option value="free">Бесплатный</option>
-          <option value="subscription">По подписке</option>
+        dict.accessLabel,
+        <select name="access_type" defaultValue={current.access_type} aria-label={dict.accessLabel}>
+          <option value="">{dict.anyAccess}</option>
+          <option value="free">{dict.accessFree}</option>
+          <option value="subscription">{dict.accessSubscription}</option>
         </select>,
         <IconShield size={14} />
       )}
 
       {field(
-        "Сортировка",
-        <select name="sort" defaultValue={current.sort} aria-label="Сортировка">
-          <option value="">По умолчанию</option>
-          <option value="relevance">По релевантности</option>
-          <option value="newest">Сначала новые</option>
-          <option value="rating">По рейтингу</option>
-          <option value="title">По названию</option>
+        dict.sortLabel,
+        <select name="sort" defaultValue={current.sort} aria-label={dict.sortLabel}>
+          <option value="">{dict.sortDefault}</option>
+          <option value="relevance">{dict.sortRelevance}</option>
+          <option value="newest">{dict.sortNewest}</option>
+          <option value="rating">{dict.sortRating}</option>
+          <option value="title">{dict.sortTitle}</option>
         </select>,
         <IconSort size={14} />
       )}
 
       <button type="submit" className="btn-primary">
-        Найти
+        {dict.submitButton}
       </button>
     </form>
   );

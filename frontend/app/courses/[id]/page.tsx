@@ -11,13 +11,17 @@ import {
 } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
 import { enrollAction } from "@/lib/actions";
-import { pluralizeRu } from "@/lib/pluralize";
 import { Rating } from "@/components/Rating";
 import { ReviewForm } from "@/components/ReviewForm";
 import { WishlistButton } from "@/components/WishlistButton";
 import { RecommendationCard } from "@/components/RecommendationCard";
 import { ErrorState } from "@/components/shell/ErrorState";
 import { IconLayers, IconPlayCircle, IconUser } from "@/components/shell/icons";
+import { getDictionary, localizeLevel } from "@/lib/i18n/dictionaries";
+import { localizeDescription, localizeTitle } from "@/lib/i18n/localize";
+import { getLocale } from "@/lib/i18n/getLocale";
+
+const DATE_LOCALES: Record<string, string> = { ru: "ru-RU", kk: "kk-KZ", en: "en-US" };
 
 export default async function CourseDetailPage({
   params,
@@ -25,6 +29,8 @@ export default async function CourseDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const locale = await getLocale();
+  const dict = getDictionary(locale);
 
   let course: Awaited<ReturnType<typeof getCourse>>;
   let error: string | null = null;
@@ -39,7 +45,7 @@ export default async function CourseDetailPage({
   if (error) {
     return (
       <main>
-        <ErrorState message={`Не удалось загрузить курс: ${error}`} />
+        <ErrorState message={dict.courseDetail.errorLoad(error)} />
       </main>
     );
   }
@@ -65,13 +71,14 @@ export default async function CourseDetailPage({
   const canReview = Boolean(myCourse && (myCourse.completed || myCourse.completed_lessons > 0));
 
   const lessonCount = course.modules.reduce((sum, m) => sum + m.lessons.length, 0);
+  const courseTitle = localizeTitle(course, locale);
 
   return (
     <main className="course-detail-shell">
-      <nav className="breadcrumbs" aria-label="Хлебные крошки">
-        <Link href="/">Главная</Link>
+      <nav className="breadcrumbs" aria-label={dict.breadcrumbs.ariaLabel}>
+        <Link href="/">{dict.breadcrumbs.home}</Link>
         <span>/</span>
-        <Link href="/courses">Курсы</Link>
+        <Link href="/courses">{dict.breadcrumbs.courses}</Link>
         {course.category_name && course.category_slug && (
           <>
             <span>/</span>
@@ -79,7 +86,7 @@ export default async function CourseDetailPage({
           </>
         )}
         <span>/</span>
-        <span>{course.title}</span>
+        <span>{courseTitle}</span>
       </nav>
 
       <div className="course-detail-layout">
@@ -91,41 +98,41 @@ export default async function CourseDetailPage({
                   {course.category_name}
                 </Link>
               )}
-              <span className="badge">{course.level}</span>
+              <span className="badge">{localizeLevel(course.level, dict)}</span>
               <span className={`badge ${isPremium ? "badge-premium" : "badge-free"}`}>
-                {isPremium ? "По подписке" : "Бесплатный"}
+                {isPremium ? dict.courses.accessSubscription : dict.courses.accessFree}
               </span>
             </div>
 
-            <h1>{course.title}</h1>
+            <h1>{courseTitle}</h1>
 
             <div className="rating-summary">
               <span className="rating-average">{course.rating_average.toFixed(1)}</span>
-              <Rating average={course.rating_average} count={course.rating_count} />
+              <Rating average={course.rating_average} count={course.rating_count} locale={locale} />
             </div>
 
             {course.modules.length > 0 && (
               <div className="course-hero-meta">
                 <span>
-                  <IconLayers size={15} /> {course.modules.length} {pluralizeRu(course.modules.length, "модуль", "модуля", "модулей")}
+                  <IconLayers size={15} /> {dict.courseDetail.modulesCount(course.modules.length)}
                 </span>
                 <span>
-                  <IconPlayCircle size={15} /> {lessonCount} {pluralizeRu(lessonCount, "урок", "урока", "уроков")}
+                  <IconPlayCircle size={15} /> {dict.courseDetail.lessonsCount(lessonCount)}
                 </span>
               </div>
             )}
 
             {course.instructor_name && (
               <p className="course-hero-instructor">
-                <IconUser size={15} /> Преподаватель: {course.instructor_name}
+                <IconUser size={15} /> {dict.courseDetail.instructorLabel(course.instructor_name)}
               </p>
             )}
 
-            <p className="course-hero-description">{course.description}</p>
+            <p className="course-hero-description">{localizeDescription(course, locale)}</p>
           </div>
 
-          <h2>Программа курса</h2>
-          {course.modules.length === 0 && <p>Модули пока не добавлены.</p>}
+          <h2>{dict.courseDetail.curriculumTitle}</h2>
+          {course.modules.length === 0 && <p>{dict.courseDetail.noModules}</p>}
 
           {course.modules.map((module) => (
             <section key={module.id} className="module">
@@ -134,31 +141,34 @@ export default async function CourseDetailPage({
                 {module.lessons.map((lesson) => (
                   <li key={lesson.id}>
                     {lesson.title}
-                    {lesson.is_free && <span className="badge badge-free">бесплатно</span>}
+                    {lesson.is_free && <span className="badge badge-free">{dict.courseDetail.freeBadge}</span>}
                   </li>
                 ))}
               </ul>
             </section>
           ))}
 
-          <h2>Отзывы</h2>
+          <h2>{dict.courseDetail.reviewsTitle}</h2>
 
           {canReview && <ReviewForm courseId={id} myReview={myReview} />}
-          {token && myCourse && !canReview && (
-            <p className="subtitle">Оставить отзыв можно после прохождения хотя бы одного урока курса.</p>
-          )}
+          {token && myCourse && !canReview && <p className="subtitle">{dict.courseDetail.canReviewHint}</p>}
 
           {!reviews || reviews.items.length === 0 ? (
-            <p>Отзывов пока нет.</p>
+            <p>{dict.courseDetail.noReviews}</p>
           ) : (
             <ul className="review-list">
               {reviews.items.map((review) => (
                 <li key={review.id} className="review-item">
                   <div className="review-item-header">
                     <span className="review-author">{review.display_name}</span>
-                    <span className="review-date">{new Date(review.created_at).toLocaleDateString("ru-RU")}</span>
+                    <span className="review-date">
+                      {new Date(review.created_at).toLocaleDateString(DATE_LOCALES[locale])}
+                    </span>
                   </div>
-                  <span className="rating">{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span>
+                  <span className="rating">
+                    {"★".repeat(review.rating)}
+                    {"☆".repeat(5 - review.rating)}
+                  </span>
                   {review.review_text && <p className="review-text">{review.review_text}</p>}
                 </li>
               ))}
@@ -167,10 +177,10 @@ export default async function CourseDetailPage({
 
           {similarCourses.length > 0 && (
             <>
-              <h2 className="mt-3">Похожие курсы</h2>
+              <h2 className="mt-3">{dict.courseDetail.similarCoursesTitle}</h2>
               <div className="course-grid">
                 {similarCourses.map((rec) => (
-                  <RecommendationCard key={rec.course_id} rec={rec} />
+                  <RecommendationCard key={rec.course_id} rec={rec} locale={locale} />
                 ))}
               </div>
             </>
@@ -181,23 +191,23 @@ export default async function CourseDetailPage({
           <div className="enroll-card">
             {!token && (
               <Link href="/login" className="btn-primary">
-                Войдите, чтобы начать обучение
+                {dict.courseDetail.enrollLoginPrompt}
               </Link>
             )}
             {token && myCourse && (
               <Link href="/dashboard/courses" className="btn-primary">
-                Продолжить обучение ({myCourse.progress_percent}%)
+                {dict.courseDetail.continueLabel(myCourse.progress_percent)}
               </Link>
             )}
             {token && !myCourse && !hasAccess && (
               <Link href="/pricing" className="btn-primary">
-                Оформить подписку
+                {dict.courseDetail.subscribeCta}
               </Link>
             )}
             {token && !myCourse && hasAccess && (
               <form action={enrollAction.bind(null, id)}>
                 <button type="submit" className="btn-primary" style={{ width: "100%" }}>
-                  Начать обучение
+                  {dict.courseDetail.enrollCta}
                 </button>
               </form>
             )}

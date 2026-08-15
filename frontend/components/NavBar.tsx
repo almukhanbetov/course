@@ -4,9 +4,21 @@ import { logoutAction } from "@/lib/actions";
 import { IconBell, IconSearch } from "@/components/shell/icons";
 import { NavBarMobileMenu } from "@/components/NavBarMobileMenu";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { LocaleSwitcher } from "@/components/LocaleSwitcher";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import type { Locale } from "@/lib/i18n/locale";
 
-export function NavBar({ user, unreadCount = 0 }: { user: PublicUser | null; unreadCount?: number }) {
+export function NavBar({
+  user,
+  unreadCount = 0,
+  locale,
+}: {
+  user: PublicUser | null;
+  unreadCount?: number;
+  locale: Locale;
+}) {
   const initials = user ? `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase() : "";
+  const dict = getDictionary(locale);
 
   return (
     <nav className="navbar">
@@ -18,18 +30,19 @@ export function NavBar({ user, unreadCount = 0 }: { user: PublicUser | null; unr
         <NavBarMobileMenu>
           <form action="/courses" method="GET" className="navbar-search">
             <IconSearch size={18} />
-            <input type="search" name="q" placeholder="Поиск курсов..." aria-label="Поиск курсов" />
+            <input type="search" name="q" placeholder={dict.nav.searchPlaceholder} aria-label={dict.nav.searchAriaLabel} />
           </form>
-          <Link href="/courses">Курсы</Link>
-          <Link href="/specialities">Специальности</Link>
-          <Link href="/pricing">Тарифы</Link>
+          <Link href="/courses">{dict.nav.courses}</Link>
+          <Link href="/specialities">{dict.nav.specialities}</Link>
+          <Link href="/pricing">{dict.nav.pricing}</Link>
+          <LocaleSwitcher locale={locale} />
           <ThemeToggle />
           {user ? (
             <>
               <span className="navbar-divider" />
               {user.role === "instructor" && <Link href="/instructor">Instructor</Link>}
               {user.role === "admin" && <Link href="/admin">Admin</Link>}
-              <Link href="/dashboard/notifications" className="bell-link" aria-label="Уведомления">
+              <Link href="/dashboard/notifications" className="bell-link" aria-label={dict.nav.notifications}>
                 <IconBell size={19} />
                 {unreadCount > 0 && <span className="bell-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>}
               </Link>
@@ -39,16 +52,16 @@ export function NavBar({ user, unreadCount = 0 }: { user: PublicUser | null; unr
               </Link>
               <form action={logoutAction} className="navbar-form">
                 <button type="submit" className="nav-link" style={{ marginTop: 0 }}>
-                  Выйти
+                  {dict.nav.logout}
                 </button>
               </form>
             </>
           ) : (
             <>
               <span className="navbar-divider" />
-              <Link href="/login">Войти</Link>
+              <Link href="/login">{dict.nav.login}</Link>
               <Link href="/register" className="btn-primary" style={{ padding: "0.5rem 1rem", fontSize: "0.88rem" }}>
-                Регистрация
+                {dict.nav.register}
               </Link>
             </>
           )}
