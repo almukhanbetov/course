@@ -15,6 +15,13 @@ type Speciality struct {
 	Published   bool      `json:"published"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+
+	// Same convention as courses.Course: Title/Description are always
+	// Russian; these are optional per-locale overrides.
+	TitleKk       *string `json:"title_kk,omitempty"`
+	TitleEn       *string `json:"title_en,omitempty"`
+	DescriptionKk *string `json:"description_kk,omitempty"`
+	DescriptionEn *string `json:"description_en,omitempty"`
 }
 
 // SpecialityCourse is a course entry within a speciality's public roadmap.
@@ -26,6 +33,14 @@ type SpecialityCourse struct {
 	Level       string    `json:"level"`
 	Position    int       `json:"position"`
 	Required    bool      `json:"required"`
+
+	// Denormalized from courses.title_kk/title_en/description_kk/
+	// description_en (see courses.Course) — same optional-override
+	// convention.
+	TitleKk       *string `json:"title_kk,omitempty"`
+	TitleEn       *string `json:"title_en,omitempty"`
+	DescriptionKk *string `json:"description_kk,omitempty"`
+	DescriptionEn *string `json:"description_en,omitempty"`
 }
 
 type SpecialityDetail struct {

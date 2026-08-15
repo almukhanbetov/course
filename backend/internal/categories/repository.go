@@ -28,7 +28,7 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-const categoryColumns = "id, name, slug, description, position, active, created_at, updated_at"
+const categoryColumns = "id, name, slug, description, position, active, created_at, updated_at, name_kk, name_en"
 
 // scanner is satisfied by both pgx.Row (QueryRow) and pgx.Rows (Query, one
 // row at a time), so a single scan function serves both the list and
@@ -39,7 +39,8 @@ type scanner interface {
 
 func scanCategory(row scanner) (*Category, error) {
 	var c Category
-	err := row.Scan(&c.ID, &c.Name, &c.Slug, &c.Description, &c.Position, &c.Active, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.Name, &c.Slug, &c.Description, &c.Position, &c.Active, &c.CreatedAt, &c.UpdatedAt,
+		&c.NameKk, &c.NameEn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

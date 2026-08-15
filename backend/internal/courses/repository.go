@@ -32,7 +32,8 @@ const courseColumns = `
 	courses.category_id, cat.name, cat.slug,
 	COALESCE(rating.avg_rating, 0) AS rating_avg, COALESCE(rating.review_count, 0) AS rating_count,
 	courses.instructor_id, TRIM(instr.first_name || ' ' || instr.last_name),
-	courses.publication_status, courses.rejection_reason
+	courses.publication_status, courses.rejection_reason,
+	courses.title_kk, courses.title_en, courses.description_kk, courses.description_en
 `
 
 const courseJoins = `
@@ -57,7 +58,8 @@ func scanCourseFull(row scanner, c *Course, extra ...any) error {
 	dest := []any{&c.ID, &c.Title, &c.Slug, &c.Description, &c.Level, &c.ImageURL, &c.Published, &c.AccessType,
 		&c.CreatedAt, &c.UpdatedAt, &c.CategoryID, &c.CategoryName, &c.CategorySlug,
 		&c.RatingAverage, &c.RatingCount, &c.InstructorID, &c.InstructorName,
-		&c.PublicationStatus, &c.RejectionReason}
+		&c.PublicationStatus, &c.RejectionReason,
+		&c.TitleKk, &c.TitleEn, &c.DescriptionKk, &c.DescriptionEn}
 	dest = append(dest, extra...)
 	return row.Scan(dest...)
 }

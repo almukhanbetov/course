@@ -15,6 +15,11 @@ type Category struct {
 	Active      bool      `json:"active"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+
+	// Name is always Russian; these are optional per-locale overrides —
+	// same convention as courses.Course.TitleKk/TitleEn.
+	NameKk *string `json:"name_kk,omitempty"`
+	NameEn *string `json:"name_en,omitempty"`
 }
 
 type CategoryInput struct {

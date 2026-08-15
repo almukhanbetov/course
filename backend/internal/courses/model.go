@@ -39,6 +39,15 @@ type Course struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
+	// Title/Description above are always Russian (NOT NULL) — the original,
+	// still-canonical content and the fallback whenever a translation below
+	// is missing. These four are optional per-locale overrides, populated
+	// only where a real translation exists (Stage: multilingual catalog).
+	TitleKk       *string `json:"title_kk,omitempty"`
+	TitleEn       *string `json:"title_en,omitempty"`
+	DescriptionKk *string `json:"description_kk,omitempty"`
+	DescriptionEn *string `json:"description_en,omitempty"`
+
 	CategoryID   *uuid.UUID `json:"category_id,omitempty"`
 	CategoryName *string    `json:"category_name,omitempty"`
 	CategorySlug *string    `json:"category_slug,omitempty"`

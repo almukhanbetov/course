@@ -32,7 +32,8 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 
 func (r *Repository) ListPublished(ctx context.Context) ([]Speciality, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, title, slug, description, image_url, published, created_at, updated_at
+		SELECT id, title, slug, description, image_url, published, created_at, updated_at,
+			title_kk, title_en, description_kk, description_en
 		FROM specialities
 		WHERE published = true
 		ORDER BY created_at DESC
@@ -45,7 +46,8 @@ func (r *Repository) ListPublished(ctx context.Context) ([]Speciality, error) {
 	result := []Speciality{}
 	for rows.Next() {
 		var s Speciality
-		if err := rows.Scan(&s.ID, &s.Title, &s.Slug, &s.Description, &s.ImageURL, &s.Published, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.Slug, &s.Description, &s.ImageURL, &s.Published, &s.CreatedAt, &s.UpdatedAt,
+			&s.TitleKk, &s.TitleEn, &s.DescriptionKk, &s.DescriptionEn); err != nil {
 			return nil, err
 		}
 		result = append(result, s)
@@ -59,10 +61,12 @@ func (r *Repository) ListPublished(ctx context.Context) ([]Speciality, error) {
 func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Speciality, error) {
 	var s Speciality
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, title, slug, description, image_url, published, created_at, updated_at
+		SELECT id, title, slug, description, image_url, published, created_at, updated_at,
+			title_kk, title_en, description_kk, description_en
 		FROM specialities
 		WHERE id = $1
-	`, id).Scan(&s.ID, &s.Title, &s.Slug, &s.Description, &s.ImageURL, &s.Published, &s.CreatedAt, &s.UpdatedAt)
+	`, id).Scan(&s.ID, &s.Title, &s.Slug, &s.Description, &s.ImageURL, &s.Published, &s.CreatedAt, &s.UpdatedAt,
+		&s.TitleKk, &s.TitleEn, &s.DescriptionKk, &s.DescriptionEn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -74,7 +78,8 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Speciality, er
 
 func (r *Repository) ListCoursesBySpeciality(ctx context.Context, specialityID uuid.UUID) ([]SpecialityCourse, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.id, c.title, c.slug, c.description, c.level, sc.position, sc.required
+		SELECT c.id, c.title, c.slug, c.description, c.level, sc.position, sc.required,
+			c.title_kk, c.title_en, c.description_kk, c.description_en
 		FROM speciality_courses sc
 		JOIN courses c ON c.id = sc.course_id
 		WHERE sc.speciality_id = $1
@@ -88,7 +93,8 @@ func (r *Repository) ListCoursesBySpeciality(ctx context.Context, specialityID u
 	result := []SpecialityCourse{}
 	for rows.Next() {
 		var sc SpecialityCourse
-		if err := rows.Scan(&sc.ID, &sc.Title, &sc.Slug, &sc.Description, &sc.Level, &sc.Position, &sc.Required); err != nil {
+		if err := rows.Scan(&sc.ID, &sc.Title, &sc.Slug, &sc.Description, &sc.Level, &sc.Position, &sc.Required,
+			&sc.TitleKk, &sc.TitleEn, &sc.DescriptionKk, &sc.DescriptionEn); err != nil {
 			return nil, err
 		}
 		result = append(result, sc)
