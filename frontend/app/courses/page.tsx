@@ -39,8 +39,11 @@ export default async function CoursesPage({
       </aside>
 
       <div className="public-main">
-        <h1>Курсы</h1>
-        <p className="subtitle">Каталог курсов по программированию, базам данных, DevOps и frontend-разработке.</p>
+        <div className="catalog-intro">
+          <p className="section-eyebrow">Каталог</p>
+          <h1>Курсы</h1>
+          <p className="subtitle">Каталог курсов по программированию, базам данных, DevOps и frontend-разработке.</p>
+        </div>
         <CourseListing searchParams={params} basePath="/courses" showFilters={false} />
       </div>
     </main>

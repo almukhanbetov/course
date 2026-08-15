@@ -16,7 +16,7 @@ export function NavBar({ user, unreadCount = 0 }: { user: PublicUser | null; unr
         </Link>
         <NavBarMobileMenu>
           <form action="/courses" method="GET" className="navbar-search">
-            <IconSearch size={16} />
+            <IconSearch size={18} />
             <input type="search" name="q" placeholder="Поиск курсов..." aria-label="Поиск курсов" />
           </form>
           <Link href="/courses">Курсы</Link>

@@ -152,6 +152,7 @@ p {
   backdrop-filter: blur(14px) saturate(1.4);
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 0 var(--border-soft), var(--shadow-sm);
 }
 
 .navbar-inner {
@@ -582,8 +583,8 @@ p {
 
 .course-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.75rem;
   margin-top: 1.5rem;
 }
 
@@ -655,10 +656,10 @@ a.recommendation-card:hover {
 }
 
 .course-card h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1.15rem;
-  line-height: 1.35;
-  letter-spacing: -0.01em;
+  margin: 0.1rem 0 0.5rem;
+  font-size: clamp(1.3rem, 1.05rem + 0.9vw, 1.7rem);
+  line-height: 1.3;
+  letter-spacing: -0.015em;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1732,6 +1733,21 @@ a.recommendation-card:hover {
   transition: transform 0.3s var(--ease);
 }
 
+/* Category-driven placeholder for courses without a real image — a faint
+   grid, a soft accent glow, and a category glyph (see lib/categoryVisuals),
+   deterministic per category rather than a stand-in photo. */
+.course-card-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--placeholder-accent, var(--text-faint));
+  background:
+    radial-gradient(140px 100px at 28% 22%, color-mix(in srgb, var(--placeholder-accent, var(--text-faint)) 20%, transparent), transparent 70%),
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--placeholder-accent, var(--text-faint)) 5%, transparent) 0 1px, transparent 1px 16px);
+}
+
 .rating {
   color: var(--warning);
   font-size: 0.9rem;
@@ -2042,8 +2058,10 @@ main.public-shell {
 .public-sidebar {
   width: var(--sidebar-width);
   flex-shrink: 0;
-  padding: 2rem 1rem;
+  padding: 1.75rem 1rem;
+  background: var(--bg-elevated);
   border-right: 1px solid var(--border);
+  box-shadow: inset -1px 0 0 0 #ffffff08;
   position: sticky;
   top: var(--topbar-height);
   height: calc(100vh - var(--topbar-height));
@@ -2607,17 +2625,21 @@ main.public-shell {
   padding: 0;
   border: none;
   background: none;
-  gap: 1.1rem;
+  gap: 1.25rem;
+}
+
+.filter-bar-sidebar > .filter-field:first-child {
+  margin-bottom: 0.25rem;
 }
 
 .filter-field {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  font-size: 0.72rem;
+  font-size: 0.76rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   color: var(--text-faint);
 }
 
@@ -2629,9 +2651,20 @@ main.public-shell {
   width: 100%;
 }
 
+/* A supporting/utility action next to the specialities sidebar and course
+   cards, not the page's loudest CTA — flat accent fill instead of the
+   glowing gradient .btn-primary uses in the hero/CTA contexts. */
 .filter-bar-sidebar .btn-primary {
   width: 100%;
   justify-content: center;
+  margin-top: 0.5rem;
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.filter-bar-sidebar .btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  filter: none;
 }
 
 .catalog-result-count {
@@ -2881,6 +2914,29 @@ main.public-shell {
   font-size: clamp(1.9rem, 1.5rem + 1.8vw, 2.75rem);
   line-height: 1.15;
   letter-spacing: -0.02em;
+}
+
+/* Catalog page title (/courses, /specialities) — direct-child selector so
+   it never reaches the homepage's .hero h1, which already has its own,
+   even larger scale. */
+.public-main > h1 {
+  font-size: clamp(1.7rem, 1.3rem + 2.2vw, 3rem);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.catalog-intro {
+  padding-bottom: 1.75rem;
+  margin-bottom: 1.75rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.catalog-intro h1 {
+  margin-top: 0.25rem;
+}
+
+.catalog-intro .subtitle {
+  margin-bottom: 0;
 }
 
 .section-eyebrow {

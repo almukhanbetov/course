@@ -36,7 +36,7 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
 
   return (
     <form action={basePath} method="GET" className={sidebar ? "filter-bar filter-bar-sidebar" : "filter-bar"}>
-      {field("Поиск", <SearchAutocomplete defaultValue={current.q} />, <IconSearch size={13} />)}
+      {field("Поиск", <SearchAutocomplete defaultValue={current.q} />, <IconSearch size={14} />)}
 
       {showCategoryFilter &&
         field(
@@ -49,7 +49,7 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
               </option>
             ))}
           </select>,
-          <IconTag size={13} />
+          <IconTag size={14} />
         )}
 
       {field(
@@ -60,7 +60,7 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
           <option value="intermediate">Средний</option>
           <option value="advanced">Продвинутый</option>
         </select>,
-        <IconBarChart size={13} />
+        <IconBarChart size={14} />
       )}
 
       {field(
@@ -70,7 +70,7 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
           <option value="free">Бесплатный</option>
           <option value="subscription">По подписке</option>
         </select>,
-        <IconShield size={13} />
+        <IconShield size={14} />
       )}
 
       {field(

@@ -233,3 +233,40 @@ export const IconAlertCircle = (p: IconProps = {}) =>
     </>,
     p
   );
+
+// Category-driven course-card placeholders (CourseCard) — one glyph per
+// known backend category slug, generic/deterministic rather than a stand-in
+// photo. Falls back to IconCourses for any category this set doesn't cover.
+export const IconDatabase = (p: IconProps = {}) =>
+  base(
+    <>
+      <ellipse cx="12" cy="5.5" rx="7.5" ry="2.8" />
+      <path d="M4.5 5.5v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V5.5" />
+      <path d="M4.5 12v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V12" />
+    </>,
+    p
+  );
+
+export const IconServerStack = (p: IconProps = {}) =>
+  base(
+    <>
+      <rect x="3.5" y="4" width="17" height="6" rx="1.5" />
+      <rect x="3.5" y="14" width="17" height="6" rx="1.5" />
+      <path d="M7 7h.01M7 17h.01" />
+    </>,
+    p
+  );
+
+export const IconCode = (p: IconProps = {}) =>
+  base(<path d="M9 8 4.5 12 9 16M15 8l4.5 4-4.5 4" />, p);
+
+export const IconBrowser = (p: IconProps = {}) =>
+  base(
+    <>
+      <rect x="3" y="4.5" width="18" height="15" rx="1.8" />
+      <path d="M3 8.5h18" />
+      <path d="M6.3 6.5h.01" />
+      <path d="M9 6.5h.01" />
+    </>,
+    p
+  );
