@@ -220,3 +220,16 @@ export const IconFlag = (p: IconProps = {}) =>
 // hand-rolled set rather than a new design system.
 export const IconActivity = (p: IconProps = {}) =>
   base(<path d="M3 12h4l2.5-7 4 14 2.5-7H21" />, p);
+
+// Error/alert states across the public pages (ErrorState component) — a
+// calm outline glyph, not a filled red triangle, matching this set's
+// restrained stroke style.
+export const IconAlertCircle = (p: IconProps = {}) =>
+  base(
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7.5v5.5" />
+      <path d="M12 16.2h.01" />
+    </>,
+    p
+  );

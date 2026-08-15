@@ -42,12 +42,14 @@ export default async function HomePage() {
       </div>
 
       <section className="home-section">
+        <p className="section-eyebrow">Каталог</p>
         <div className="section-header">
           <h2>Популярные курсы</h2>
           <Link href="/courses" className="nav-link">
             Все курсы →
           </Link>
         </div>
+        <p className="section-subtitle">Курсы, доступные для изучения прямо сейчас.</p>
         {popularCourses && popularCourses.items.length > 0 ? (
           <div className="course-grid">
             {popularCourses.items.map((course) => (
@@ -60,12 +62,14 @@ export default async function HomePage() {
       </section>
 
       <section className="home-section">
+        <p className="section-eyebrow">Roadmap</p>
         <div className="section-header">
           <h2>Специальности</h2>
           <Link href="/specialities" className="nav-link">
             Все специальности →
           </Link>
         </div>
+        <p className="section-subtitle">Комплексные программы из нескольких курсов, ведущие к конкретной профессии.</p>
         {specialities.length > 0 ? (
           <div className="speciality-grid">
             {specialities.map((s) => (
@@ -78,7 +82,9 @@ export default async function HomePage() {
       </section>
 
       <section className="home-section">
+        <p className="section-eyebrow">Преимущества</p>
         <h2>Почему выбирают нашу платформу</h2>
+        <p className="section-subtitle">Всё необходимое для последовательного и измеримого обучения.</p>
         <div className="value-grid">
           <div className="value-card">
             <div className="value-icon">

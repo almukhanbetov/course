@@ -11,11 +11,13 @@ import {
 } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
 import { enrollAction } from "@/lib/actions";
+import { pluralizeRu } from "@/lib/pluralize";
 import { Rating } from "@/components/Rating";
 import { ReviewForm } from "@/components/ReviewForm";
 import { WishlistButton } from "@/components/WishlistButton";
 import { RecommendationCard } from "@/components/RecommendationCard";
-import { IconUser } from "@/components/shell/icons";
+import { ErrorState } from "@/components/shell/ErrorState";
+import { IconLayers, IconPlayCircle, IconUser } from "@/components/shell/icons";
 
 export default async function CourseDetailPage({
   params,
@@ -37,7 +39,7 @@ export default async function CourseDetailPage({
   if (error) {
     return (
       <main>
-        <p role="alert">Не удалось загрузить курс: {error}</p>
+        <ErrorState message={`Не удалось загрузить курс: ${error}`} />
       </main>
     );
   }
@@ -61,6 +63,8 @@ export default async function CourseDetailPage({
   // completed OR at least one completed lesson)) — myCourse is null when
   // not enrolled, so this is false in that case too.
   const canReview = Boolean(myCourse && (myCourse.completed || myCourse.completed_lessons > 0));
+
+  const lessonCount = course.modules.reduce((sum, m) => sum + m.lessons.length, 0);
 
   return (
     <main className="course-detail-shell">
@@ -99,6 +103,17 @@ export default async function CourseDetailPage({
               <span className="rating-average">{course.rating_average.toFixed(1)}</span>
               <Rating average={course.rating_average} count={course.rating_count} />
             </div>
+
+            {course.modules.length > 0 && (
+              <div className="course-hero-meta">
+                <span>
+                  <IconLayers size={15} /> {course.modules.length} {pluralizeRu(course.modules.length, "модуль", "модуля", "модулей")}
+                </span>
+                <span>
+                  <IconPlayCircle size={15} /> {lessonCount} {pluralizeRu(lessonCount, "урок", "урока", "уроков")}
+                </span>
+              </div>
+            )}
 
             {course.instructor_name && (
               <p className="course-hero-instructor">

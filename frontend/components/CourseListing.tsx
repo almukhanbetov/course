@@ -4,6 +4,8 @@ import { getSessionToken } from "@/lib/session";
 import { CourseCard } from "@/components/CourseCard";
 import { CourseFilters } from "@/components/CourseFilters";
 import { CoursePagination } from "@/components/CoursePagination";
+import { ErrorState } from "@/components/shell/ErrorState";
+import { IconCourses } from "@/components/shell/icons";
 import { pluralizeRu } from "@/lib/pluralize";
 
 export type SearchParams = Record<string, string | string[] | undefined>;
@@ -56,7 +58,7 @@ export async function CourseListing({ searchParams, basePath, fixedCategory, sho
   }
 
   if (loadError || !result || !categories) {
-    return <p role="alert">Не удалось загрузить курсы. Попробуйте позже.</p>;
+    return <ErrorState message="Не удалось загрузить курсы. Попробуйте позже." />;
   }
 
   // Wishlist is a second, authenticated-only enrichment call (item 3) —
@@ -79,7 +81,9 @@ export async function CourseListing({ searchParams, basePath, fixedCategory, sho
 
       {result.items.length === 0 ? (
         <div className="empty-state">
-          <p>Курсы не найдены.</p>
+          <IconCourses size={26} />
+          <p className="empty-state-title">Курсы не найдены</p>
+          <p className="empty-state-text">Попробуйте изменить фильтры или сбросить их.</p>
           <Link href={basePath} className="btn-secondary">
             Сбросить фильтры
           </Link>

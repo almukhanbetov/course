@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { getSpecialities } from "@/lib/api";
 import { SpecialityCard } from "@/components/SpecialityCard";
 import { PublicShell } from "@/components/shell/PublicShell";
+import { ErrorState } from "@/components/shell/ErrorState";
+import { IconGraduationCap } from "@/components/shell/icons";
 
 export const metadata: Metadata = {
   title: "Специальности — LMS Platform",
@@ -22,14 +24,23 @@ export default async function SpecialitiesPage() {
       <h1>Специальности</h1>
       <p className="subtitle">Пошаговые траектории обучения из нескольких курсов.</p>
 
-      {error && <p role="alert">Не удалось загрузить специальности: {error}</p>}
-      {!error && specialities.length === 0 && <p>Специальностей пока нет.</p>}
+      {error && <ErrorState message={`Не удалось загрузить специальности: ${error}`} />}
 
-      <div className="speciality-grid">
-        {specialities.map((speciality) => (
-          <SpecialityCard key={speciality.id} speciality={speciality} />
-        ))}
-      </div>
+      {!error && specialities.length === 0 && (
+        <div className="empty-state">
+          <IconGraduationCap size={26} />
+          <p className="empty-state-title">Специальностей пока нет</p>
+          <p className="empty-state-text">Загляните позже — новые roadmap-траектории появятся здесь.</p>
+        </div>
+      )}
+
+      {specialities.length > 0 && (
+        <div className="speciality-grid">
+          {specialities.map((speciality) => (
+            <SpecialityCard key={speciality.id} speciality={speciality} />
+          ))}
+        </div>
+      )}
     </PublicShell>
   );
 }

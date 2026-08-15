@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { getSpeciality, getMyRoadmap } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
 import { pluralizeRu } from "@/lib/pluralize";
+import { ErrorState } from "@/components/shell/ErrorState";
+import { IconGraduationCap } from "@/components/shell/icons";
 
 export default async function SpecialityDetailPage({
   params,
@@ -24,7 +26,7 @@ export default async function SpecialityDetailPage({
   if (error) {
     return (
       <main>
-        <p role="alert">Не удалось загрузить специальность: {error}</p>
+        <ErrorState message={`Не удалось загрузить специальность: ${error}`} />
       </main>
     );
   }
@@ -39,7 +41,7 @@ export default async function SpecialityDetailPage({
   const progressByCourseId = new Map((roadmap?.courses ?? []).map((c) => [c.course_id, c]));
 
   return (
-    <main>
+    <main className="speciality-detail-shell">
       <nav className="breadcrumbs" aria-label="Хлебные крошки">
         <Link href="/">Главная</Link>
         <span>/</span>
@@ -49,6 +51,9 @@ export default async function SpecialityDetailPage({
       </nav>
 
       <div className="course-hero">
+        <div className="speciality-detail-icon">
+          <IconGraduationCap size={22} />
+        </div>
         <h1>{speciality.title}</h1>
         <p className="course-hero-description">{speciality.description}</p>
         <p className="subtitle">

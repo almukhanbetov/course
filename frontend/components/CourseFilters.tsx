@@ -1,5 +1,6 @@
 import type { Category } from "@/lib/api";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
+import { IconBarChart, IconSearch, IconShield, IconTag } from "@/components/shell/icons";
 
 interface Props {
   categories: Category[];
@@ -20,10 +21,13 @@ interface Props {
 // exactly as before, autocomplete is purely additive.
 export function CourseFilters({ categories, basePath, current, showCategoryFilter, layout = "bar" }: Props) {
   const sidebar = layout === "sidebar";
-  const field = (label: string, control: React.ReactNode) =>
+  const field = (label: string, control: React.ReactNode, icon?: React.ReactNode) =>
     sidebar ? (
       <label className="filter-field">
-        <span>{label}</span>
+        <span>
+          {icon}
+          {label}
+        </span>
         {control}
       </label>
     ) : (
@@ -32,7 +36,7 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
 
   return (
     <form action={basePath} method="GET" className={sidebar ? "filter-bar filter-bar-sidebar" : "filter-bar"}>
-      {field("Поиск", <SearchAutocomplete defaultValue={current.q} />)}
+      {field("Поиск", <SearchAutocomplete defaultValue={current.q} />, <IconSearch size={13} />)}
 
       {showCategoryFilter &&
         field(
@@ -44,7 +48,8 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
                 {c.name}
               </option>
             ))}
-          </select>
+          </select>,
+          <IconTag size={13} />
         )}
 
       {field(
@@ -54,7 +59,8 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
           <option value="beginner">Начальный</option>
           <option value="intermediate">Средний</option>
           <option value="advanced">Продвинутый</option>
-        </select>
+        </select>,
+        <IconBarChart size={13} />
       )}
 
       {field(
@@ -63,7 +69,8 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
           <option value="">Любой доступ</option>
           <option value="free">Бесплатный</option>
           <option value="subscription">По подписке</option>
-        </select>
+        </select>,
+        <IconShield size={13} />
       )}
 
       {field(

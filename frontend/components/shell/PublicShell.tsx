@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getSpecialities } from "@/lib/api";
 import { SidebarAccordion } from "@/components/shell/SidebarAccordion";
+import { IconGraduationCap } from "@/components/shell/icons";
 
 // Shared wide layout for public marketing/catalog pages (/, /courses,
 // /specialities): a left sidebar of specialities plus a main content column.
@@ -20,7 +21,8 @@ export async function PublicShell({ children }: { children: React.ReactNode }) {
           <nav className="public-sidebar-nav">
             {specialities.map((s) => (
               <Link key={s.id} href={`/specialities/${s.slug}`}>
-                {s.title}
+                <IconGraduationCap size={14} />
+                <span>{s.title}</span>
               </Link>
             ))}
             {specialities.length === 0 && <p className="public-sidebar-empty">Специальностей пока нет.</p>}

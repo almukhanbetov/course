@@ -500,6 +500,7 @@ p {
 .btn-primary:hover:not(:disabled) {
   filter: brightness(1.08);
   color: #fff;
+  transform: translateY(-1px);
 }
 
 .btn-primary:active:not(:disabled) {
@@ -525,13 +526,18 @@ p {
   font-size: 0.92rem;
   text-decoration: none;
   cursor: pointer;
-  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease), transform 0.15s var(--ease);
 }
 
 .btn-secondary:hover {
   border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:active {
+  transform: translateY(1px);
 }
 
 .btn-danger {
@@ -588,7 +594,7 @@ p {
   padding: 1.25rem;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
-  transition: transform 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.18s var(--ease);
+  transition: transform 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 
 .course-card:has(.course-card-link:hover),
@@ -596,6 +602,10 @@ p {
   transform: translateY(-3px);
   border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
+}
+
+.course-card:has(.course-card-link:hover) .course-card-image img {
+  transform: scale(1.035);
 }
 
 a.course-card:hover,
@@ -646,8 +656,13 @@ a.recommendation-card:hover {
 
 .course-card h2 {
   margin: 0 0 0.5rem;
-  font-size: 1.08rem;
+  font-size: 1.15rem;
+  line-height: 1.35;
   letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .course-card-description {
@@ -999,10 +1014,17 @@ a.recommendation-card:hover {
   border-radius: var(--radius-md);
   padding: 1.1rem 1.3rem;
   background: var(--surface);
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.roadmap-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
 }
 
 .roadmap-card h3 {
   margin: 0 0 0.4rem;
+  font-size: 1.1rem;
 }
 
 /* ==========================================================================
@@ -1707,6 +1729,7 @@ a.recommendation-card:hover {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.3s var(--ease);
 }
 
 .rating {
@@ -2044,18 +2067,33 @@ main.public-shell {
 }
 
 .public-sidebar-nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   padding: 0.55rem 0.6rem;
   border-radius: var(--radius-sm);
+  border-left: 2px solid transparent;
   color: var(--text-muted);
   font-size: 0.88rem;
   font-weight: 500;
   text-decoration: none;
-  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+
+.public-sidebar-nav a svg {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  transition: color 0.15s var(--ease);
 }
 
 .public-sidebar-nav a:hover {
   background: var(--surface-hover);
   color: var(--text);
+  border-left-color: var(--accent);
+}
+
+.public-sidebar-nav a:hover svg {
+  color: var(--accent);
 }
 
 .public-sidebar-all {
@@ -2117,15 +2155,19 @@ main.public-shell {
     radial-gradient(700px 320px at 100% 0%, var(--accent-soft), transparent 65%),
     linear-gradient(135deg, var(--surface), var(--surface-2));
   border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 0 #ffffff0d, var(--shadow-sm);
 }
 
 .hero h1 {
-  font-size: clamp(2.2rem, 1.7rem + 2.2vw, 3.4rem);
+  font-size: clamp(2.4rem, 1.7rem + 2.8vw, 4rem);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
   margin-top: 0;
 }
 
 .hero .subtitle {
   font-size: 1.15rem;
+  line-height: 1.65;
   max-width: 620px;
 }
 
@@ -2156,6 +2198,13 @@ main.public-shell {
   padding: 1.5rem;
   background: var(--surface);
   text-align: left;
+  transition: transform 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.value-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
 }
 
 .value-card .value-icon {
@@ -2168,10 +2217,16 @@ main.public-shell {
   align-items: center;
   justify-content: center;
   margin-bottom: 0.9rem;
+  transition: transform 0.2s var(--ease);
+}
+
+.value-card:hover .value-icon {
+  transform: scale(1.08);
 }
 
 .value-card h3 {
-  font-size: 1rem;
+  font-size: 1.05rem;
+  line-height: 1.35;
 }
 
 .value-card p {
@@ -2192,6 +2247,7 @@ main.public-shell {
   background:
     radial-gradient(560px 240px at 100% 0%, var(--accent-soft), transparent 65%),
     linear-gradient(135deg, var(--surface), var(--surface-2));
+  box-shadow: inset 0 1px 0 0 #ffffff0d, var(--shadow-sm);
 }
 
 .course-hero-badges {
@@ -2725,23 +2781,27 @@ main.public-shell {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.45rem;
   color: var(--text-faint);
   font-size: 0.85rem;
-  margin-bottom: 1rem;
+  font-weight: 500;
+  margin-bottom: 1.5rem;
 }
 
 .breadcrumbs a {
   color: var(--text-muted);
   text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s var(--ease);
 }
 
 .breadcrumbs a:hover {
-  color: var(--text);
+  color: var(--accent);
 }
 
 .breadcrumbs span:last-child {
   color: var(--text);
+  font-weight: 600;
 }
 
 /* ==========================================================================
@@ -2792,5 +2852,319 @@ main.public-shell {
 
   .course-detail-aside {
     position: static;
+  }
+}
+
+/* ==========================================================================
+   Visual refinement pass — scoped typography, section rhythm, depth,
+   motion. Everything in this block targets public-page containers
+   (.public-shell / .course-detail-shell / .speciality-detail-shell) or
+   components exclusive to them, specifically so it never reaches the base
+   h1–h4 rules admin/instructor pages also render against.
+   ========================================================================== */
+
+.public-shell h2,
+.course-detail-shell h2,
+.speciality-detail-shell h2 {
+  font-size: clamp(1.7rem, 1.4rem + 1.3vw, 2.5rem);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.course-detail-shell h2,
+.speciality-detail-shell h2 {
+  margin-top: clamp(2.75rem, 2.2rem + 2.5vw, 5rem);
+}
+
+.course-detail-shell h1,
+.speciality-detail-shell h1 {
+  font-size: clamp(1.9rem, 1.5rem + 1.8vw, 2.75rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.section-eyebrow {
+  display: block;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin: 0 0 0.5rem;
+}
+
+.section-subtitle {
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1.6;
+  max-width: 60ch;
+  margin: 0 0 1.5rem;
+}
+
+/* Section rhythm: desktop ~72–96px, tablet ~56px, mobile ~40px between
+   homepage "chapters" — plus a hairline divider so the boundary reads even
+   without relying on spacing alone. */
+.home-section {
+  margin-top: clamp(2.5rem, 2rem + 3vw, 6rem);
+}
+
+.home-section + .home-section {
+  padding-top: clamp(2.5rem, 2rem + 3vw, 6rem);
+  border-top: 1px solid var(--border-soft);
+  margin-top: 0;
+}
+
+.home-cta {
+  margin-top: clamp(2.5rem, 2rem + 3vw, 6rem);
+}
+
+/* ==========================================================================
+   Sidebar polish: divider under the accordion header, icon-label alignment
+   in the filter form
+   ========================================================================== */
+
+.public-sidebar-body {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.filter-field > span {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.filter-field > span svg {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Course detail: real-data metadata row (modules/lessons), speciality
+   detail icon badge
+   ========================================================================== */
+
+.course-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0 0 0.6rem;
+  flex-wrap: wrap;
+}
+
+.course-hero-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.course-hero-meta svg {
+  color: var(--text-faint);
+}
+
+.speciality-detail-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+/* Curriculum module titles, scoped so the shared .module/.lesson-list
+   classes (also used by /admin/system-health) are untouched. */
+.course-detail-main .module h3 {
+  font-size: 1.15rem;
+}
+
+/* ==========================================================================
+   Empty/error states: consistent icon + title + supporting text
+   ========================================================================== */
+
+.empty-state svg {
+  color: var(--text-faint);
+  margin-bottom: 0.75rem;
+}
+
+.empty-state-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 0.4rem;
+}
+
+.empty-state-text {
+  margin: 0 0 1.25rem;
+  font-size: 0.92rem;
+}
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.5rem;
+  padding: 2.5rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.error-state svg {
+  color: var(--warning);
+}
+
+.error-state p {
+  margin: 0;
+  max-width: 48ch;
+}
+
+/* ==========================================================================
+   Header polish: search focus state, mobile menu slide
+   ========================================================================== */
+
+.navbar-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+@media (max-width: 900px) {
+  .navbar-links {
+    transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+    transform: translateY(-6px);
+  }
+
+  .navbar-links.open {
+    transform: translateY(0);
+  }
+}
+
+/* ==========================================================================
+   Focus-visible (keyboard navigation) — global on purpose, this is baseline
+   accessibility rather than a visual redesign of any specific page.
+   ========================================================================== */
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ==========================================================================
+   Loading skeletons
+   ========================================================================== */
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 37%, var(--surface) 63%);
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+  display: block;
+}
+
+.skeleton-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  background: var(--surface);
+}
+
+.skeleton-image {
+  aspect-ratio: 16 / 9;
+  margin-bottom: 0.9rem;
+}
+
+.skeleton-line {
+  height: 0.85rem;
+  margin-bottom: 0.6rem;
+}
+
+.skeleton-line:last-child {
+  margin-bottom: 0;
+}
+
+/* ==========================================================================
+   Moderate entrance animation — section-level, not per-element, and fully
+   disabled under prefers-reduced-motion below.
+   ========================================================================== */
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hero,
+.home-section,
+.home-cta {
+  animation: fade-in-up 0.5s var(--ease) both;
+}
+
+.home-section:nth-of-type(2) {
+  animation-delay: 0.06s;
+}
+
+.home-section:nth-of-type(3) {
+  animation-delay: 0.12s;
+}
+
+.home-cta {
+  animation-delay: 0.18s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ==========================================================================
+   Responsive: tighten section rhythm and typography on small screens
+   (clamp() above already handles most of this; these are the remaining
+   fixed values that don't scale on their own)
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .hero {
+    padding: 2rem 1.5rem;
+  }
+
+  .course-hero {
+    padding: 1.5rem 1.75rem;
+  }
+
+  .section-eyebrow {
+    font-size: 0.7rem;
   }
 }
