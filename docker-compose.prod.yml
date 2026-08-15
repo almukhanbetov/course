@@ -33,6 +33,16 @@ services:
     ports: !override
       - "127.0.0.1:${BACKEND_PORT}:8080"
 
+  # Production Launch Fix 1: same "buildable service -> published image"
+  # override as every other service here. ADMIN_BOOTSTRAP_EMAIL/PASSWORD
+  # are NOT set here — they stay whatever the VPS's own .env has them as
+  # (or deliberately unset, once an admin already exists and they're no
+  # longer needed), the same "VPS secrets stay on the VPS" convention as
+  # every other production secret.
+  admin-bootstrap:
+    build: !reset null
+    image: ${IMAGE_REGISTRY}/course-bootstrap-admin:${IMAGE_TAG}
+
   frontend:
     build: !reset null
     image: ${IMAGE_REGISTRY}/course-frontend:${IMAGE_TAG}

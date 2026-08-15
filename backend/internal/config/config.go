@@ -78,6 +78,17 @@ type Config struct {
 	// why in-process state (no Redis, no DB table) is the right call here.
 	AuthRateLimitMaxAttempts int
 	AuthRateLimitWindowSec   int
+
+	// AdminBootstrapEmail/Password (Production Launch Fix 1) are only ever
+	// read by cmd/bootstrap-admin, never by the API server itself — they
+	// exist so the first admin account can come from runtime configuration
+	// (a GitHub Secret / the VPS's own .env) instead of a hardcoded
+	// migration. Deliberately no default value for either: an empty
+	// default is what makes cmd/bootstrap-admin's fail-closed check
+	// (refuse to proceed if these are unset and no active admin exists
+	// yet) actually mean something.
+	AdminBootstrapEmail    string
+	AdminBootstrapPassword string
 }
 
 func Load() Config {
@@ -136,6 +147,9 @@ func Load() Config {
 		// still bounding a scripted brute-force burst.
 		AuthRateLimitMaxAttempts: getEnvInt("AUTH_RATE_LIMIT_MAX_ATTEMPTS", 10),
 		AuthRateLimitWindowSec:   getEnvInt("AUTH_RATE_LIMIT_WINDOW_SEC", 300),
+
+		AdminBootstrapEmail:    getEnv("ADMIN_BOOTSTRAP_EMAIL", ""),
+		AdminBootstrapPassword: getEnv("ADMIN_BOOTSTRAP_PASSWORD", ""),
 	}
 }
 

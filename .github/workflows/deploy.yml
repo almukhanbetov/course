@@ -162,6 +162,20 @@ jobs:
              docker compose -f docker-compose.yml -f docker-compose.prod.yml \
                up --exit-code-from migrate migrate"
 
+      # Production Launch Fix 1. Exit-code gated exactly like migrations
+      # above, for the same reason: a real admin must exist before backend
+      # restarts, and cmd/bootstrap-admin itself fails closed (non-zero
+      # exit) if no active admin exists yet and ADMIN_BOOTSTRAP_EMAIL/
+      # ADMIN_BOOTSTRAP_PASSWORD aren't set on the VPS's own .env — see
+      # .env.production.example. On every deploy after the first real
+      # admin exists, this is a fast no-op, not a blocker.
+      - name: Run admin bootstrap
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_DIR' && set -a && . ./.env && set +a && \
+             docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+               up --exit-code-from admin-bootstrap admin-bootstrap"
+
       # Named explicitly, not a bare 'up -d' — mailpit stays defined in the
       # base compose file (for dev) but must never start in production; see
       # docker-compose.prod.yml's own comment on this. Ordering among these

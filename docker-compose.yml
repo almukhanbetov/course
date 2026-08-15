@@ -77,6 +77,24 @@ services:
       postgres:
         condition: service_healthy
 
+  # Production Launch Fix 1: ensures at least one active admin account
+  # exists, from ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD only —
+  # never from a hardcoded migration (see cmd/bootstrap-admin's own doc
+  # comment and 00041_neutralize_seeded_admin_credential.sql). Safe to run
+  # on every `up`: a no-op whenever an active admin already exists. Runs
+  # once and exits, same shape as `migrate` — not a restarted service.
+  admin-bootstrap:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.bootstrap-admin
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   backend:
     build:
       context: ./backend
@@ -105,6 +123,8 @@ services:
       - "${BACKEND_PORT}:8080"
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      admin-bootstrap:
         condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully

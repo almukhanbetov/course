@@ -20,6 +20,12 @@ jobs:
       BACKEND_PORT: "8080"
       DATABASE_URL: postgres://ci:ci_password@postgres:5432/ci?sslmode=disable
       JWT_SECRET: ci-only-test-secret-not-for-production
+      # CI-only throwaway bootstrap credential — backend now depends on
+      # admin-bootstrap completing (Production Launch Fix 1), and this is a
+      # genuinely fresh database with no existing admin, so cmd/bootstrap-admin
+      # would otherwise correctly fail closed here, breaking this job.
+      ADMIN_BOOTSTRAP_EMAIL: ci-admin@example.com
+      ADMIN_BOOTSTRAP_PASSWORD: ci-only-test-password-not-for-production
       MINIO_ROOT_USER: ci-minio-admin
       MINIO_ROOT_PASSWORD: ci-minio-secret
       MINIO_API_PORT: "9000"
@@ -53,7 +59,7 @@ jobs:
         run: docker compose down -v --remove-orphans
 
       - name: Build backend image
-        run: docker compose build backend
+        run: docker compose build backend admin-bootstrap
 
       - name: Start PostgreSQL and wait for healthy
         run: docker compose up -d --wait postgres
@@ -84,6 +90,10 @@ jobs:
       - name: Show backend logs
         if: failure()
         run: docker compose logs backend --tail=200
+
+      - name: Show admin-bootstrap logs
+        if: failure()
+        run: docker compose logs admin-bootstrap --tail=200
 
       - name: Tear down
         if: always()
