@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getSpecialities } from "@/lib/api";
 import { SpecialityCard } from "@/components/SpecialityCard";
+import { PublicShell } from "@/components/shell/PublicShell";
 
 export const metadata: Metadata = {
   title: "Специальности — LMS Platform",
@@ -17,7 +18,7 @@ export default async function SpecialitiesPage() {
   }
 
   return (
-    <main>
+    <PublicShell>
       <h1>Специальности</h1>
       <p className="subtitle">Пошаговые траектории обучения из нескольких курсов.</p>
 
@@ -29,6 +30,6 @@ export default async function SpecialitiesPage() {
           <SpecialityCard key={speciality.id} speciality={speciality} />
         ))}
       </div>
-    </main>
+    </PublicShell>
   );
 }

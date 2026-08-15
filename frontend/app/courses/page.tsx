@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { CourseListing } from "@/components/CourseListing";
+import { PublicShell } from "@/components/shell/PublicShell";
 
 export const metadata: Metadata = {
   title: "Курсы — LMS Platform",
@@ -20,10 +21,10 @@ export default async function CoursesPage({
   const params = await searchParams;
 
   return (
-    <main>
+    <PublicShell>
       <h1>Курсы</h1>
       <p className="subtitle">Каталог курсов по программированию, базам данных, DevOps и frontend-разработке.</p>
       <CourseListing searchParams={params} basePath="/courses" />
-    </main>
+    </PublicShell>
   );
 }
