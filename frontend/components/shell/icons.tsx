@@ -280,3 +280,17 @@ export const IconSort = (p: IconProps = {}) =>
     </>,
     p
   );
+
+// Theme toggle (ThemeToggle) — sun shown while the dark theme is active
+// (click to switch to light), moon shown while light is active.
+export const IconSun = (p: IconProps = {}) =>
+  base(
+    <>
+      <circle cx="12" cy="12" r="4.5" />
+      <path d="M12 2.5v2.5M12 19v2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2.5 12h2.5M19 12h2.5M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" />
+    </>,
+    p
+  );
+
+export const IconMoon = (p: IconProps = {}) =>
+  base(<path d="M20.5 14.5a8.5 8.5 0 1 1-9-11 7 7 0 0 0 9 11Z" />, p);

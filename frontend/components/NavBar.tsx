@@ -3,6 +3,7 @@ import type { PublicUser } from "@/lib/api";
 import { logoutAction } from "@/lib/actions";
 import { IconBell, IconSearch } from "@/components/shell/icons";
 import { NavBarMobileMenu } from "@/components/NavBarMobileMenu";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function NavBar({ user, unreadCount = 0 }: { user: PublicUser | null; unreadCount?: number }) {
   const initials = user ? `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase() : "";
@@ -22,6 +23,7 @@ export function NavBar({ user, unreadCount = 0 }: { user: PublicUser | null; unr
           <Link href="/courses">Курсы</Link>
           <Link href="/specialities">Специальности</Link>
           <Link href="/pricing">Тарифы</Link>
+          <ThemeToggle />
           {user ? (
             <>
               <span className="navbar-divider" />

@@ -26,6 +26,7 @@
   --accent-soft: #6d8bff1f;
   --accent-soft-strong: #6d8bff33;
   --accent-contrast: #08090d;
+  --accent-glow: #6d8bff33;
 
   /* Semantic */
   --success: #4fd196;
@@ -46,7 +47,11 @@
   --shadow-sm: 0 1px 2px #00000040;
   --shadow-md: 0 8px 24px -8px #00000066;
   --shadow-lg: 0 24px 48px -16px #00000080;
-  --shadow-glow: 0 0 0 1px var(--accent-soft-strong), 0 8px 24px -8px #6d8bff33;
+  --shadow-glow: 0 0 0 1px var(--accent-soft-strong), 0 8px 24px -8px var(--accent-glow);
+
+  /* Decorative page-background glow (body::before) */
+  --decor-1: #6d8bff14;
+  --decor-2: #9d7bff10;
 
   /* Layout */
   --sidebar-width: 264px;
@@ -55,6 +60,51 @@
 
   /* Motion */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Light theme — applied via data-theme="light" on <html>, set before
+   hydration by the inline script in RootLayout (see app/layout.tsx) so
+   there's no flash of the wrong theme. Same token names/roles as the dark
+   palette above; every rule in this file reads colors through these
+   variables (not literal hex), so redefining them here is what makes the
+   whole app re-theme — this block does not restyle individual components. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f6f7fb;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #eef0f6;
+  --surface-hover: #e7eaf2;
+  --border: #e1e4ec;
+  --border-soft: #eaecf2;
+  --border-strong: #c9cedb;
+
+  --text: #14161f;
+  --text-muted: #565c6e;
+  --text-faint: #878da0;
+
+  --accent: #4a5fd9;
+  --accent-hover: #3b4ec4;
+  --accent-soft: #4a5fd91a;
+  --accent-soft-strong: #4a5fd933;
+  --accent-contrast: #ffffff;
+  --accent-glow: #4a5fd933;
+
+  --success: #1f9d6c;
+  --success-soft: #1f9d6c1a;
+  --warning: #b4790f;
+  --warning-soft: #b4790f1a;
+  --danger: #d43f5c;
+  --danger-soft: #d43f5c1a;
+  --info: #3f6fd4;
+
+  --shadow-sm: 0 1px 2px #00000014;
+  --shadow-md: 0 8px 24px -8px #00000024;
+  --shadow-lg: 0 24px 48px -16px #00000030;
+
+  --decor-1: #4a5fd90a;
+  --decor-2: #7c5fd90a;
 }
 
 * {
@@ -82,8 +132,8 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(1100px 520px at 12% -10%, #6d8bff14, transparent 60%),
-    radial-gradient(900px 480px at 88% 0%, #9d7bff10, transparent 55%);
+    radial-gradient(1100px 520px at 12% -10%, var(--decor-1), transparent 60%),
+    radial-gradient(900px 480px at 88% 0%, var(--decor-2), transparent 55%);
 }
 
 main {
@@ -296,6 +346,31 @@ p {
 .bell-link:hover {
   background: var(--surface-hover);
   color: var(--text);
+}
+
+.theme-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease);
+}
+
+.theme-toggle-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.theme-toggle-btn:active {
+  transform: scale(0.94);
 }
 
 .bell-badge {

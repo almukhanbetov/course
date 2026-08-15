@@ -22,8 +22,18 @@ export default async function RootLayout({
   const unreadCount = user && token ? await getUnreadNotificationCount(token) : 0;
 
   return (
-    <html lang="ru" className={inter.variable}>
+    <html lang="ru" className={inter.variable} suppressHydrationWarning>
       <body>
+        {/* Sets data-theme on <html> before the rest of the body paints, so
+            a light-theme visitor never sees a flash of the dark theme.
+            Kept as a tiny inline script (not a "use client" component)
+            specifically so it runs synchronously, ahead of hydration —
+            see components/ThemeToggle.tsx for the interactive half. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark"){t=window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}document.documentElement.setAttribute("data-theme",t)}catch(e){}})();`,
+          }}
+        />
         <div className="page-shell">
           <NavBar user={user} unreadCount={unreadCount} />
           {children}
