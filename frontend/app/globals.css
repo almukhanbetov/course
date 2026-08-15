@@ -1658,6 +1658,15 @@ a.recommendation-card:hover {
   flex: 1 1 220px;
 }
 
+/* .filter-field only wraps fields in the vertical sidebar layout — there,
+   the flex-basis above (sized for a horizontal row's width) was instead
+   read as a *height* basis in the column-direction flex context, forcing
+   the search field to ~220px tall and blowing a huge gap into the
+   sidebar. */
+.filter-field .search-autocomplete {
+  flex: 0 0 auto;
+}
+
 .search-autocomplete input[type="search"] {
   width: 100%;
 }
