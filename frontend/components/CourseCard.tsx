@@ -30,7 +30,8 @@ export function CourseCard({
             <img src={course.image_url} alt="" />
           ) : (
             <div className="course-card-placeholder" style={{ "--placeholder-accent": accent } as React.CSSProperties}>
-              <PlaceholderIcon size={24} />
+              <PlaceholderIcon size={96} className="course-card-placeholder-watermark" />
+              <PlaceholderIcon size={26} className="course-card-placeholder-icon" />
             </div>
           )}
         </div>

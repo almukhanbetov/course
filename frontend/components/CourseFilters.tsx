@@ -1,6 +1,6 @@
 import type { Category } from "@/lib/api";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
-import { IconBarChart, IconSearch, IconShield, IconTag } from "@/components/shell/icons";
+import { IconBarChart, IconSearch, IconShield, IconSort, IconTag } from "@/components/shell/icons";
 
 interface Props {
   categories: Category[];
@@ -81,7 +81,8 @@ export function CourseFilters({ categories, basePath, current, showCategoryFilte
           <option value="newest">Сначала новые</option>
           <option value="rating">По рейтингу</option>
           <option value="title">По названию</option>
-        </select>
+        </select>,
+        <IconSort size={14} />
       )}
 
       <button type="submit" className="btn-primary">

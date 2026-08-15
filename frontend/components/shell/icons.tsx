@@ -270,3 +270,13 @@ export const IconBrowser = (p: IconProps = {}) =>
     </>,
     p
   );
+
+// Sort direction — CourseFilters' "Сортировка" field label.
+export const IconSort = (p: IconProps = {}) =>
+  base(
+    <>
+      <path d="M7 4v16M7 4 3.5 7.5M7 4l3.5 3.5" />
+      <path d="M17 20V4M17 20l-3.5-3.5M17 20l3.5-3.5" />
+    </>,
+    p
+  );
